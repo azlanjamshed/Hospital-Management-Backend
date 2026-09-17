@@ -1,0 +1,388 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ========================================
+// USER
+// ========================================
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String?  @unique
+  phone        String?  @unique
+  passwordHash String
+  role         UserRole @default(PATIENT)
+
+  patient Patient?
+  doctor  Doctor?
+
+  memberships OrganizationMember[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ========================================
+// ORGANIZATION / HOSPITAL
+// ========================================
+
+model Organization {
+  id   String           @id @default(uuid())
+  name String
+  type OrganizationType @default(HOSPITAL)
+
+  timezone String  @default("Asia/Kolkata")
+  address  String?
+  phone    String?
+  email    String?
+
+  status OrganizationStatus @default(ACTIVE)
+
+  members      OrganizationMember[]
+  doctors      Doctor[]
+  departments  Department[]
+  patients     PatientOrganization[]
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ========================================
+// ORGANIZATION MEMBERS
+// ========================================
+
+model OrganizationMember {
+  id             String @id @default(uuid())
+  userId         String
+  organizationId String
+
+  role   StaffRole
+  status MembershipStatus @default(ACTIVE)
+
+  user         User         @relation(fields: [userId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+}
+
+// ========================================
+// PATIENT
+// ========================================
+
+model Patient {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  name        String
+  dateOfBirth DateTime?
+  gender      Gender?
+
+  user User @relation(fields: [userId], references: [id])
+
+  phones        PatientPhone[]
+  organizations PatientOrganization[]
+  appointments  Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ========================================
+// PATIENT PHONE
+// ========================================
+
+model PatientPhone {
+  id        String  @id @default(uuid())
+  patientId String
+  phone     String
+  isPrimary Boolean @default(false)
+  verified  Boolean @default(false)
+
+  patient Patient @relation(fields: [patientId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([patientId, phone])
+  @@index([phone])
+}
+
+// ========================================
+// PATIENT ↔ HOSPITAL
+// ========================================
+
+model PatientOrganization {
+  id             String @id @default(uuid())
+  patientId      String
+  organizationId String
+
+  hospitalPatientNumber String
+
+  patient      Patient      @relation(fields: [patientId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([patientId, organizationId])
+  @@unique([organizationId, hospitalPatientNumber])
+  @@index([organizationId])
+}
+
+// ========================================
+// DOCTOR
+// ========================================
+
+model Doctor {
+  id             String  @id @default(uuid())
+  organizationId String
+  userId         String? @unique
+
+  name                 String
+  qualification        String?
+  registrationNumber   String?
+  consultationFeeMinor Int?
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User?        @relation(fields: [userId], references: [id])
+
+  departments  DoctorDepartment[]
+  schedules    Schedule[]
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+}
+
+// ========================================
+// DEPARTMENT
+// ========================================
+
+model Department {
+  id             String @id @default(uuid())
+  organizationId String
+
+  name String
+
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  doctors      DoctorDepartment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+// ========================================
+// DOCTOR ↔ DEPARTMENT
+// ========================================
+
+model DoctorDepartment {
+  doctorId     String
+  departmentId String
+
+  doctor     Doctor     @relation(fields: [doctorId], references: [id])
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@id([doctorId, departmentId])
+}
+
+// ========================================
+// DOCTOR SCHEDULE
+// ========================================
+
+model Schedule {
+  id       String @id @default(uuid())
+  doctorId String
+
+  weekday     Int
+  startTime   String
+  endTime     String
+  slotMinutes Int    @default(30)
+
+  doctor Doctor @relation(fields: [doctorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([doctorId])
+}
+
+// ========================================
+// APPOINTMENT
+// ========================================
+
+model Appointment {
+  id             String @id @default(uuid())
+  organizationId String
+  patientId      String
+  doctorId       String
+
+  appointmentDate DateTime
+  startAt         DateTime
+  endAt           DateTime
+
+  tokenNumber Int?
+
+  patientType PatientType       @default(NEW)
+  source      AppointmentSource @default(PATIENT_APP)
+  status      AppointmentStatus @default(PENDING)
+
+  consultationFeeMinor Int
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  patient      Patient      @relation(fields: [patientId], references: [id])
+  doctor       Doctor       @relation(fields: [doctorId], references: [id])
+
+  payment Payment?
+  queue   QueueEntry?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([appointmentDate])
+  @@index([doctorId, startAt])
+}
+
+// ========================================
+// PAYMENT
+// ========================================
+
+model Payment {
+  id            String @id @default(uuid())
+  appointmentId String @unique
+
+  amountMinor Int
+  method      PaymentMethod
+  status      PaymentStatus @default(PENDING)
+
+  transactionId String?
+  paidAt        DateTime?
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([transactionId])
+}
+
+// ========================================
+// QUEUE / TOKEN
+// ========================================
+
+model QueueEntry {
+  id            String @id @default(uuid())
+  appointmentId String @unique
+
+  tokenNumber Int
+  status      QueueStatus @default(WAITING)
+
+  checkedInAt DateTime?
+  calledAt    DateTime?
+  completedAt DateTime?
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([appointmentId, tokenNumber])
+}
+
+// ========================================
+// ENUMS
+// ========================================
+
+enum UserRole {
+  PATIENT
+  STAFF
+  DOCTOR
+  SUPER_ADMIN
+}
+
+enum StaffRole {
+  ADMIN
+  RECEPTIONIST
+  NURSE
+  MANAGER
+}
+
+enum OrganizationType {
+  HOSPITAL
+  CLINIC
+  DIAGNOSTIC_CENTER
+  MEDICAL_CENTER
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PatientType {
+  NEW
+  EXISTING
+  FOLLOW_UP
+}
+
+enum AppointmentSource {
+  PATIENT_APP
+  STAFF
+  WHATSAPP
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum PaymentMethod {
+  ONLINE
+  PAY_AT_HOSPITAL
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum QueueStatus {
+  WAITING
+  CALLED
+  IN_CONSULTATION
+  COMPLETED
+  SKIPPED
+}

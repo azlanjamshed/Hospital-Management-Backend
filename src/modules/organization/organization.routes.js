@@ -11,6 +11,7 @@ const {
   createOrganizationSchema,
   createOrganizationAdminSchema,
 } = require("./organization.validation");
+const requireOrganizationRole = require("../../middleware/organization");
 
 router.post(
   "/",
@@ -25,6 +26,18 @@ router.post(
   role("SUPER_ADMIN"),
   validation(createOrganizationAdminSchema),
   createOrganizationAdmin,
+);
+router.get(
+  "/:organizationId/admin-test",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  (req, res) => {
+    return res.status(200).json({
+      success: true,
+      message: "Organization admin access granted",
+      organization: req.organization,
+    });
+  },
 );
 
 module.exports = router;

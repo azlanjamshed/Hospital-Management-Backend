@@ -26,7 +26,23 @@ const createOrganizationSchema = z.object({
 
   email: z.string().trim().email("Invalid email").optional(),
 });
+const createOrganizationAdminSchema = z.object({
+  organizationId: z.string().uuid("Invalid organization ID"),
+
+  name: z.string().trim().min(2, "Name must be at least 2 characters"),
+
+  email: z.string().trim().email("Invalid email"),
+
+  phone: z
+    .string()
+    .trim()
+    .min(10, "Phone number must be at least 10 characters")
+    .optional(),
+
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
 
 module.exports = {
   createOrganizationSchema,
+  createOrganizationAdminSchema
 };

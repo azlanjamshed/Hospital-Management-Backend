@@ -27,17 +27,5 @@ router.post(
   validation(createOrganizationAdminSchema),
   createOrganizationAdmin,
 );
-router.get(
-  "/:organizationId/admin-test",
-  authentication,
-  requireOrganizationRole("ADMIN"),
-  (req, res) => {
-    return res.status(200).json({
-      success: true,
-      message: "Organization admin access granted",
-      organization: req.organization,
-    });
-  },
-);
 
 module.exports = router;

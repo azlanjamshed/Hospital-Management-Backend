@@ -5,11 +5,21 @@ const {
   getDoctorById,
   updateDoctor,
   updateDoctorStatus,
+  updateDoctorDepartments,
+  createStaff,
+  getStaff,
+  getStaffById,
+  updateStaff,
+  updateStaffStatus,
 } = require("./organization-staff.controller");
 const {
   createDoctorSchema,
   updateDoctorSchema,
   updateDoctorStatusSchema,
+  updateDoctorDepartmentsSchema,
+  createStaffSchema,
+  updateStaffSchema,
+  updateStaffStatusSchema,
 } = require("./organization-staff.validation");
 const authentication = require("../../middleware/auth");
 const requireOrganizationRole = require("../../middleware/organization");
@@ -30,7 +40,7 @@ router.get(
   getDoctors,
 );
 router.get(
-  "/:organizationId/:doctorId",
+  "/:organizationId/doctors/:doctorId",
   authentication,
   requireOrganizationRole("ADMIN"),
   getDoctorById,
@@ -49,5 +59,48 @@ router.patch(
   requireOrganizationRole("ADMIN"),
   validate(updateDoctorStatusSchema),
   updateDoctorStatus,
+);
+router.patch(
+  "/:organizationId/doctors/:doctorId/departments",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  validate(updateDoctorDepartmentsSchema),
+  updateDoctorDepartments,
+);
+
+router.post(
+  "/:organizationId/staff",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  validate(createStaffSchema),
+  createStaff,
+);
+router.get(
+  "/:organizationId/staff",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  getStaff,
+);
+
+router.get(
+  "/:organizationId/staff/:staffId",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  getStaffById,
+);
+
+router.patch(
+  "/:organizationId/staff/:staffId",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  validate(updateStaffSchema),
+  updateStaff,
+);
+router.patch(
+  "/:organizationId/staff/:staffId/status",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  validate(updateStaffStatusSchema),
+  updateStaffStatus,
 );
 module.exports = router;

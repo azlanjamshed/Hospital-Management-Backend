@@ -39,6 +39,53 @@ const createDoctor = async (req, res) => {
   }
 };
 
+const getDoctors = async (req, res) => {
+  try {
+    const organizationId = req.organization.id;
+
+    const doctors = await organizationStaffService.getDoctors(organizationId);
+
+    return res.status(200).json({
+      success: true,
+      message: "Doctors fetched successfully",
+      data: doctors,
+    });
+  } catch (error) {
+    console.error("Get doctors error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch doctors",
+    });
+  }
+};
+const getDoctorById = async (req, res) => {
+  try {
+    const organizationId = req.organization.id;
+    const { doctorId } = req.params;
+
+    const doctor = await organizationStaffService.getDoctorById(
+      organizationId,
+      doctorId,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Doctor fetched successfully",
+      data: doctor,
+    });
+  } catch (error) {
+    console.error("Get doctor error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to fetch doctor",
+    });
+  }
+};
+
 module.exports = {
   createDoctor,
+  getDoctors,
+  getDoctorById,
 };

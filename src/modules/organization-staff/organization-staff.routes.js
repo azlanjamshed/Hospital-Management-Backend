@@ -1,5 +1,9 @@
 const express = require("express");
-const { createDoctor } = require("./organization-staff.controller");
+const {
+  createDoctor,
+  getDoctors,
+  getDoctorById,
+} = require("./organization-staff.controller");
 const { createDoctorSchema } = require("./organization-staff.validation");
 const authentication = require("../../middleware/auth");
 const requireOrganizationRole = require("../../middleware/organization");
@@ -12,6 +16,18 @@ router.post(
   requireOrganizationRole("ADMIN"),
   validate(createDoctorSchema),
   createDoctor,
+);
+router.get(
+  "/:organizationId/doctors",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  getDoctors,
+);
+router.get(
+  "/:organizationId/:doctorId",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  getDoctorById,
 );
 
 module.exports = router;

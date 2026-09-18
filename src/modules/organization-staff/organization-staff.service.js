@@ -114,6 +114,70 @@ const createDoctor = async (organizationId, data) => {
   return result;
 };
 
+const getDoctors = async (organizationId) => {
+  const doctors = await prisma.doctor.findMany({
+    where: {
+      organizationId,
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+        },
+      },
+      departments: {
+        include: {
+          department: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  return doctors;
+};
+
+const getDoctorById = async (organizationId, doctorId) => {
+  const doctor = await prisma.doctor.findFirst({
+    where: {
+      id: doctorId,
+      organizationId,
+    },
+    include: {
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+        },
+      },
+      departments: {
+        include: {
+          department: true,
+        },
+      },
+      schedules: true,
+    },
+  });
+
+  if (!doctor) {
+    const error = new Error("Doctor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return doctor;
+};
 module.exports = {
   createDoctor,
+  getDoctors,
+  getDoctorById,
 };

@@ -176,8 +176,165 @@ const getDoctorById = async (organizationId, doctorId) => {
 
   return doctor;
 };
+
+const updateDoctor = async (organizationId, doctorId, data) => {
+  // 1. Find doctor inside this organization
+  const doctor = await prisma.doctor.findFirst({
+    where: {
+      id: doctorId,
+      organizationId,
+    },
+  });
+
+  if (!doctor) {
+    const error = new Error("Doctor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // 2. Check registration number if it is being changed
+  if (
+    data.registrationNumber &&
+    data.registrationNumber !== doctor.registrationNumber
+  ) {
+    const existingDoctor = await prisma.doctor.findFirst({
+      where: {
+        organizationId,
+        registrationNumber: data.registrationNumber,
+        id: {
+          not: doctorId,
+        },
+      },
+    });
+
+    if (existingDoctor) {
+      const error = new Error(
+        "A doctor with this registration number already exists",
+      );
+
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  // 3. Verify departments belong to this organization
+  if (data.departmentIds) {
+    const departments = await prisma.department.findMany({
+      where: {
+        id: {
+          in: data.departmentIds,
+        },
+        organizationId,
+      },
+    });
+
+    if (departments.length !== data.departmentIds.length) {
+      const error = new Error(
+        "One or more departments do not belong to this organization",
+      );
+
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  // 4. Update doctor + department relationships
+  const result = await prisma.$transaction(async (tx) => {
+    const updatedDoctor = await tx.doctor.update({
+      where: {
+        id: doctorId,
+      },
+      data: {
+        ...(data.name !== undefined && {
+          name: data.name,
+        }),
+        ...(data.qualification !== undefined && {
+          qualification: data.qualification,
+        }),
+        ...(data.registrationNumber !== undefined && {
+          registrationNumber: data.registrationNumber,
+        }),
+        ...(data.consultationFeeMinor !== undefined && {
+          consultationFeeMinor: data.consultationFeeMinor,
+        }),
+      },
+    });
+
+    // Update User name/phone if those fields were provided
+    if (data.name !== undefined || data.phone !== undefined) {
+      await tx.user.update({
+        where: {
+          id: doctor.userId,
+        },
+        data: {
+          ...(data.name !== undefined && {
+            name: data.name,
+          }),
+          ...(data.phone !== undefined && {
+            phone: data.phone,
+          }),
+        },
+      });
+    }
+
+    // Replace department assignments only when departmentIds is provided
+    if (data.departmentIds !== undefined) {
+      await tx.doctorDepartment.deleteMany({
+        where: {
+          doctorId,
+        },
+      });
+
+      if (data.departmentIds.length > 0) {
+        await tx.doctorDepartment.createMany({
+          data: data.departmentIds.map((departmentId) => ({
+            doctorId,
+            departmentId,
+          })),
+        });
+      }
+    }
+
+    return updatedDoctor;
+  });
+
+  return result;
+};
+
+const updateDoctorStatus = async (organizationId, doctorId, status) => {
+  const doctor = await prisma.doctor.findFirst({
+    where: {
+      id: doctorId,
+      organizationId,
+    },
+  });
+
+  if (!doctor) {
+    const error = new Error("Doctor not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (doctor.status === status) {
+    const error = new Error(`Doctor is already ${status.toLowerCase()}`);
+    error.statusCode = 409;
+    throw error;
+  }
+
+  return prisma.doctor.update({
+    where: {
+      id: doctorId,
+    },
+    data: {
+      status,
+    },
+  });
+};
+
 module.exports = {
   createDoctor,
   getDoctors,
   getDoctorById,
+  updateDoctor,
+  updateDoctorStatus,
 };

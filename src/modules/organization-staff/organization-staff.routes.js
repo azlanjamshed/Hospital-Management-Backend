@@ -3,8 +3,14 @@ const {
   createDoctor,
   getDoctors,
   getDoctorById,
+  updateDoctor,
+  updateDoctorStatus,
 } = require("./organization-staff.controller");
-const { createDoctorSchema } = require("./organization-staff.validation");
+const {
+  createDoctorSchema,
+  updateDoctorSchema,
+  updateDoctorStatusSchema,
+} = require("./organization-staff.validation");
 const authentication = require("../../middleware/auth");
 const requireOrganizationRole = require("../../middleware/organization");
 const validate = require("../../middleware/validate");
@@ -29,5 +35,19 @@ router.get(
   requireOrganizationRole("ADMIN"),
   getDoctorById,
 );
+router.patch(
+  "/:organizationId/doctors/:doctorId",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  validate(updateDoctorSchema),
+  updateDoctor,
+);
 
+router.patch(
+  "/:organizationId/doctors/:doctorId/status",
+  authentication,
+  requireOrganizationRole("ADMIN"),
+  validate(updateDoctorStatusSchema),
+  updateDoctorStatus,
+);
 module.exports = router;

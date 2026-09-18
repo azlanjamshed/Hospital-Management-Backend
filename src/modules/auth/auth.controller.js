@@ -48,6 +48,18 @@ const login = async (req, res) => {
           dateOfBirth: result.user.dateOfBirth,
           patientId: result.user.patient?.id,
           doctorId: result.user.doctor?.id,
+
+          memberships: result.user.memberships.map((membership) => ({
+            id: membership.id,
+            organizationId: membership.organizationId,
+            role: membership.role,
+            status: membership.status,
+            organization: {
+              id: membership.organization.id,
+              name: membership.organization.name,
+              type: membership.organization.type,
+            },
+          })),
         },
       },
     });

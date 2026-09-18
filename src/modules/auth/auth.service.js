@@ -53,7 +53,11 @@ const login = async (email, password) => {
     },
     include: {
       patient: true,
-      memberships: true,
+      memberships: {
+        include: {
+          organization: true,
+        },
+      },
       doctor: true,
     },
   });

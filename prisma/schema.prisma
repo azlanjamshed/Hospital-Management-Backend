@@ -152,6 +152,8 @@ model Doctor {
   registrationNumber   String?
   consultationFeeMinor Int?
 
+  status DoctorStatus @default(ACTIVE)
+
   organization Organization @relation(fields: [organizationId], references: [id])
   user         User?        @relation(fields: [userId], references: [id])
 
@@ -173,8 +175,8 @@ model Department {
   id             String @id @default(uuid())
   organizationId String
 
-  name String
-
+  name         String
+  status       DepartmentStatus   @default(ACTIVE)
   organization Organization       @relation(fields: [organizationId], references: [id])
   doctors      DoctorDepartment[]
 
@@ -385,4 +387,14 @@ enum QueueStatus {
   IN_CONSULTATION
   COMPLETED
   SKIPPED
+}
+
+enum DoctorStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DepartmentStatus {
+  ACTIVE
+  INACTIVE
 }

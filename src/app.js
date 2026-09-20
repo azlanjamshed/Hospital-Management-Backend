@@ -8,7 +8,7 @@ const organizationRoutes = require("./modules/organization/organization.routes")
 const organizationStaffRoutes = require("./modules/organization-staff/organization-staff.routes");
 const departmentRoutes = require("./modules/Department/department.routes");
 const patientRoutes = require("./modules/patient/patient.routes");
-
+const scheduleRoutes = require("./modules/schedule/schedule.routes");
 app.use(cors());
 app.use(express.json());
 
@@ -17,5 +17,6 @@ app.use("/api/organization", organizationRoutes);
 app.use("/api/organization-staff", organizationStaffRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/patients", patientRoutes);
+app.use("/api/schedules", scheduleRoutes);
 
 module.exports = app;

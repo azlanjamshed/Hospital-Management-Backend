@@ -32,15 +32,15 @@ router.get(
 router.patch(
   "/:organizationId/doctors/:doctorId/schedules/:scheduleId",
   authentication,
-  requireOrganizationRole("ADMIN", "MANAGER"),
+  requireOrganizationRole("ADMIN", "DOCTOR", "MANAGER"),
   validate(updateScheduleSchema),
   updateSchedule,
 );
 
 router.delete(
-  "/:organizationId/doctors/:dostorId/schedules/:scheduleId",
+  "/:organizationId/doctors/:doctorId/schedules/:scheduleId",
   authentication,
-  requireOrganizationRole("ADMIN", "MANAGER"),
+  requireOrganizationRole("ADMIN", "DOCTOR", "MANAGER"),
   deleteSchedule,
 );
 module.exports = router;

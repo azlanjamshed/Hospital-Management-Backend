@@ -14,13 +14,6 @@ const createScheduleSchema = z.object({
   endTime: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "End time must be in HH:mm format"),
-
-  slotMinutes: z
-    .number()
-    .int()
-    .min(5, "Slot duration must be at least 5 minutes")
-    .max(240, "Slot duration cannot exceed 240 minutes")
-    .default(30),
 });
 
 const updateScheduleSchema = z.object({
@@ -39,13 +32,6 @@ const updateScheduleSchema = z.object({
   endTime: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "End time must be in HH:mm format")
-    .optional(),
-
-  slotMinutes: z
-    .number()
-    .int()
-    .min(5, "Slot duration must be at least 5 minutes")
-    .max(240, "Slot duration cannot exceed 240 minutes")
     .optional(),
 });
 

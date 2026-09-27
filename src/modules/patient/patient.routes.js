@@ -2,11 +2,14 @@ const express = require("express");
 const validate = require("../../middleware/validate");
 const authentication = require("../../middleware/auth");
 const requireOrganizationRole = require("../../middleware/organization");
+const patientOrOrganizationRole = require("../../middleware/patientOrOrganizationRole");
+
 const {
   createPatient,
   searchPatients,
   linkPatientToOrganization,
   getPatientById,
+  getPatientAppointments,
 } = require("./patient.controller");
 const {
   createPatientSchema,
@@ -42,5 +45,13 @@ router.get(
   authentication,
   requireOrganizationRole("ADMIN", "NURSE"),
   getPatientById,
+);
+
+router.get(
+  "/:organizationId/patients/:patientId/appointments",
+  authentication,
+  patientOrOrganizationRole("ADMIN", "MANAGER", "RECEPTIONIST", "NURSE"),
+
+  getPatientAppointments,
 );
 module.exports = router;

@@ -56,7 +56,6 @@ const createSchedule = async (organizationId, doctorId, data) => {
       weekday: data.weekday,
       startTime: data.startTime,
       endTime: data.endTime,
-      slotMinutes: data.slotMinutes,
     },
   });
 
@@ -163,11 +162,16 @@ const updateSchedule = async (organizationId, doctorId, scheduleId, data) => {
     throw error;
   }
 
+  const updateData = {};
+  if (data.weekday !== undefined) updateData.weekday = data.weekday;
+  if (data.startTime !== undefined) updateData.startTime = data.startTime;
+  if (data.endTime !== undefined) updateData.endTime = data.endTime;
+
   const schedule = await prisma.schedule.update({
     where: {
       id: scheduleId,
     },
-    data,
+    data: updateData,
   });
 
   return schedule;

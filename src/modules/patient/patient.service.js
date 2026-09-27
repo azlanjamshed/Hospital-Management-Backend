@@ -368,9 +368,70 @@ const getPatientById = async (organizationId, patientId) => {
 
   return patient;
 };
+const getPatientAppointments = async ({ organizationId, patientId }) => {
+  // Check patient belongs to this organization
+  const patientOrganization = await prisma.patientOrganization.findUnique({
+    where: {
+      patientId_organizationId: {
+        patientId,
+        organizationId,
+      },
+    },
+    include: {
+      patient: true,
+    },
+  });
+
+  if (!patientOrganization) {
+    const error = new Error("Patient does not belong to this organization");
+
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      organizationId,
+      patientId,
+    },
+    include: {
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          qualification: true,
+        },
+      },
+
+      appointmentWindow: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+        },
+      },
+    },
+
+    orderBy: {
+      appointmentDate: "desc",
+    },
+  });
+
+  return {
+    patient: {
+      id: patientOrganization.patient.id,
+      name: patientOrganization.patient.name,
+      hospitalPatientNumber: patientOrganization.hospitalPatientNumber,
+    },
+
+    appointments,
+  };
+};
 module.exports = {
   createPatient,
   searchPatients,
   linkPatientToOrganization,
   getPatientById,
+  getPatientAppointments,
 };

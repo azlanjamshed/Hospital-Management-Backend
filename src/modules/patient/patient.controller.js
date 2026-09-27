@@ -97,9 +97,37 @@ const getPatientById = async (req, res) => {
     });
   }
 };
+
+const getPatientAppointments = async (req, res) => {
+  try {
+    const { organizationId, patientId } = req.params;
+
+    const history = await patientService.getPatientAppointments({
+      organizationId,
+      patientId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Patient appointment history fetched successfully",
+      data: history,
+    });
+  } catch (error) {
+    console.error("Get patient appointment history error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch patient appointment history",
+    });
+  }
+};
+
 module.exports = {
   createPatient,
   searchPatients,
   linkPatientToOrganization,
   getPatientById,
+  getPatientAppointments,
 };

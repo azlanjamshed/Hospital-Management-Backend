@@ -49,6 +49,7 @@ model Organization {
   patients           PatientOrganization[]
   appointments       Appointment[]
   appointmentWindows AppointmentWindow[]
+  consultations      Consultation[]
   patientSequence    OrganizationPatientSequence?
   dailyTokenCounters DoctorDailyTokenCounter[]
 
@@ -95,6 +96,7 @@ model Patient {
   phones        PatientPhone[]
   organizations PatientOrganization[]
   appointments  Appointment[]
+  consultations Consultation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -155,8 +157,7 @@ model Doctor {
   registrationNumber   String?
   consultationFeeMinor Int?
 
-followUpPeriodDays Int @default(30)
-
+  followUpPeriodDays Int @default(30)
 
   status             DoctorStatus             @default(ACTIVE)
   availabilityStatus DoctorAvailabilityStatus @default(AVAILABLE)
@@ -168,6 +169,7 @@ followUpPeriodDays Int @default(30)
   schedules          Schedule[]
   appointments       Appointment[]
   appointmentWindows AppointmentWindow[]
+  consultations      Consultation[]
   dailyTokenCounters DoctorDailyTokenCounter[]
 
   createdAt DateTime @default(now())
@@ -254,8 +256,8 @@ model AppointmentWindow {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([organizationId, date])
   @@unique([doctorId, date])
+  @@index([organizationId, date])
 }
 
 // ========================================
@@ -282,23 +284,24 @@ model Appointment {
 
   consultationFeeMinor Int
 
-  organization      Organization      @relation(fields: [organizationId], references: [id])
-  patient           Patient           @relation(fields: [patientId], references: [id])
-  doctor            Doctor            @relation(fields: [doctorId], references: [id])
+  organization      Organization       @relation(fields: [organizationId], references: [id])
+  patient           Patient            @relation(fields: [patientId], references: [id])
+  doctor            Doctor             @relation(fields: [doctorId], references: [id])
   appointmentWindow AppointmentWindow? @relation(fields: [appointmentWindowId], references: [id])
 
-  payment Payment?
-  queue   QueueEntry?
+  payment      Payment?
+  queue        QueueEntry?
+  consultation Consultation?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([doctorId, appointmentDate, tokenNumber])
   @@index([organizationId])
   @@index([patientId])
   @@index([doctorId])
   @@index([appointmentDate])
   @@index([doctorId, startAt])
-    @@unique([doctorId, appointmentDate, tokenNumber])
 }
 
 // ========================================
@@ -332,8 +335,7 @@ model QueueEntry {
   id            String @id @default(uuid())
   appointmentId String @unique
 
-  
-  status      QueueStatus @default(WAITING)
+  status QueueStatus @default(WAITING)
 
   checkedInAt DateTime?
   calledAt    DateTime?
@@ -343,8 +345,38 @@ model QueueEntry {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
 
- 
+// ========================================
+// CONSULTATION
+// ========================================
+
+model Consultation {
+  id             String @id @default(uuid())
+  appointmentId  String @unique
+  patientId      String
+  doctorId       String
+  organizationId String
+
+  chiefComplaint String?
+  diagnosis      String?
+  notes          String?
+  doctorRemarks  String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  appointment  Appointment  @relation(fields: [appointmentId], references: [id])
+  patient      Patient      @relation(fields: [patientId], references: [id])
+  doctor       Doctor       @relation(fields: [doctorId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([doctorId])
 }
 
 // ========================================

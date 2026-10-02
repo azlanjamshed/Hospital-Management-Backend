@@ -1,4 +1,6 @@
 const prescriptionService = require("./prescription.service");
+const prisma = require("../../config/prisma");
+const prescriptionPdfService = require("./prescription.pdf.service");
 
 const createPrescription = async (req, res) => {
   try {
@@ -65,9 +67,20 @@ const getPatientPrescription = async (req, res) => {
   try {
     const prescriptionId = req.params.prescriptionId;
 
-    const patientId = req.patient?.id || req.user?.patientId;
+    // Only PATIENT role can use this endpoint
+    if (req.user.role !== "PATIENT") {
+      return res.status(403).json({
+        success: false,
+        message: "This endpoint is for patients only",
+      });
+    }
 
-    if (!patientId) {
+    // JWT only has userId — look up the patient record
+    const patient = await prisma.patient.findUnique({
+      where: { userId: req.user.userId },
+    });
+
+    if (!patient) {
       return res.status(403).json({
         success: false,
         message: "Patient profile not found",
@@ -76,11 +89,12 @@ const getPatientPrescription = async (req, res) => {
 
     const prescription = await prescriptionService.getPatientPrescription({
       prescriptionId,
-      patientId,
+      patientId: patient.id,
     });
 
     return res.status(200).json({
       success: true,
+      message: "Prescription fetched successfully",
       data: prescription,
     });
   } catch (error) {
@@ -90,9 +104,87 @@ const getPatientPrescription = async (req, res) => {
     });
   }
 };
+const getPrescriptionPrintData = async (req, res) => {
+  try {
+    const organizationId = req.params.organizationId;
+    const prescriptionId = req.params.prescriptionId;
 
+    const prescription = await prescriptionService.getPrescriptionPrintData({
+      organizationId,
+      prescriptionId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: prescription,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to get prescription print data",
+    });
+  }
+};
+const generatePrescriptionPdf = async (req, res) => {
+  try {
+    const organizationId = req.params.organizationId;
+    const prescriptionId = req.params.prescriptionId;
+
+    const data = await prescriptionService.getPrescriptionPrintData({
+      organizationId,
+      prescriptionId,
+    });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="prescription-${prescriptionId}.pdf"`,
+    );
+
+    prescriptionPdfService.generatePrescriptionPdf(data, res);
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to generate prescription PDF",
+    });
+  }
+};
+const generatePatientPrescriptionPdf = async (req, res) => {
+  try {
+    const prescriptionId = req.params.prescriptionId;
+
+    const patientId = req.patient?.id;
+
+    if (!patientId) {
+      return res.status(403).json({
+        success: false,
+        message: "Patient profile not found",
+      });
+    }
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="prescription-${prescriptionId}.pdf"`,
+    );
+
+    await prescriptionPdfService.generatePatientPrescriptionPdf({
+      prescriptionId,
+      patientId,
+      res,
+    });
+  } catch (error) {
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Failed to generate prescription PDF",
+    });
+  }
+};
 module.exports = {
   createPrescription,
   getPrescription,
   getPatientPrescription,
+  getPrescriptionPrintData,
+  generatePrescriptionPdf,
+  generatePatientPrescriptionPdf,
 };

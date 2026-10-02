@@ -177,9 +177,95 @@ const getPatientPrescription = async ({ prescriptionId, patientId }) => {
 
   return prescription;
 };
+const getPrescriptionPrintData = async ({ organizationId, prescriptionId }) => {
+  const prescription = await prisma.prescription.findFirst({
+    where: {
+      id: prescriptionId,
+      organizationId,
+    },
+    include: {
+      items: {
+        orderBy: {
+          createdAt: "asc",
+        },
+      },
+
+      patient: {
+        select: {
+          id: true,
+          name: true,
+          dateOfBirth: true,
+          gender: true,
+        },
+      },
+
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          qualification: true,
+          registrationNumber: true,
+        },
+      },
+
+      organization: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          address: true,
+          phone: true,
+          email: true,
+        },
+      },
+
+      consultation: {
+        select: {
+          id: true,
+          chiefComplaint: true,
+          diagnosis: true,
+          notes: true,
+          doctorRemarks: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!prescription) {
+    const error = new Error("Prescription not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    prescription: {
+      id: prescription.id,
+      issuedAt: prescription.issuedAt,
+    },
+
+    organization: prescription.organization,
+
+    patient: prescription.patient,
+
+    doctor: prescription.doctor,
+
+    consultation: prescription.consultation,
+
+    medicines: prescription.items.map((item) => ({
+      medicineName: item.medicineName,
+      dosage: item.dosage,
+      frequency: item.frequency,
+      duration: item.duration,
+      instructions: item.instructions,
+    })),
+  };
+};
 
 module.exports = {
   createPrescription,
   getPrescription,
   getPatientPrescription,
+  getPrescriptionPrintData,
 };

@@ -13,6 +13,7 @@ const availabilityRoutes = require("./modules/availability/availability.routes")
 const appointmentRoutes = require("./modules/appointment/appointment.routes");
 const appointmentWindowRoutes = require("./modules/appointment-window/appointmentWindow.routes");
 const queueRoutes = require("./modules/queue/queue.routes");
+const consultationRoutes = require("./modules/consultation/consultation.routes");
 
 app.use(cors());
 app.use(express.json());
@@ -27,5 +28,5 @@ app.use("/api/availability", availabilityRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/appointment-windows", appointmentWindowRoutes);
 app.use("/api/queue", queueRoutes);
+app.use(["/api/consultation", "/api/consultations"], consultationRoutes);
 module.exports = app;
-

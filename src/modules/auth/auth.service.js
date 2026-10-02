@@ -80,6 +80,7 @@ const login = async (email, password) => {
     {
       userId: user.id,
       role: user.role,
+      doctorId: user.doctor?.id || null,
     },
     process.env.JWT_SECRET,
     {

@@ -30,7 +30,7 @@ router.patch(
 router.get(
   "/:organizationId/:consultationId",
   authentication,
-  requireOrganizationRole("ADMIN", "MANAGER", "NURSE", "DOCTOR"),
+  requireOrganizationRole("ADMIN", "NURSE", "DOCTOR"),
   getConsultation,
 );
 module.exports = router;

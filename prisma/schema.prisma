@@ -50,6 +50,7 @@ model Organization {
   appointments       Appointment[]
   appointmentWindows AppointmentWindow[]
   consultations      Consultation[]
+  prescriptions      Prescription[]
   patientSequence    OrganizationPatientSequence?
   dailyTokenCounters DoctorDailyTokenCounter[]
 
@@ -97,6 +98,7 @@ model Patient {
   organizations PatientOrganization[]
   appointments  Appointment[]
   consultations Consultation[]
+  prescriptions Prescription[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -170,6 +172,7 @@ model Doctor {
   appointments       Appointment[]
   appointmentWindows AppointmentWindow[]
   consultations      Consultation[]
+  prescriptions      Prescription[]
   dailyTokenCounters DoctorDailyTokenCounter[]
 
   createdAt DateTime @default(now())
@@ -371,12 +374,63 @@ model Consultation {
   doctor       Doctor       @relation(fields: [doctorId], references: [id])
   organization Organization @relation(fields: [organizationId], references: [id])
 
+  prescription Prescription?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([organizationId])
   @@index([patientId])
   @@index([doctorId])
+}
+
+// ========================================
+// PRESCRIPTION
+// ========================================
+
+model Prescription {
+  id             String @id @default(uuid())
+  consultationId String @unique
+  patientId      String
+  doctorId       String
+  organizationId String
+
+  issuedAt DateTime @default(now())
+
+  consultation Consultation       @relation(fields: [consultationId], references: [id])
+  patient      Patient            @relation(fields: [patientId], references: [id])
+  doctor       Doctor             @relation(fields: [doctorId], references: [id])
+  organization Organization       @relation(fields: [organizationId], references: [id])
+  items        PrescriptionItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([doctorId])
+}
+
+// ========================================
+// PRESCRIPTION ITEM
+// ========================================
+
+model PrescriptionItem {
+  id             String @id @default(uuid())
+  prescriptionId String
+
+  medicineName String
+  dosage       String?
+  frequency    String?
+  duration     String?
+  instructions String?
+
+  prescription Prescription @relation(fields: [prescriptionId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([prescriptionId])
 }
 
 // ========================================

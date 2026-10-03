@@ -27,7 +27,9 @@ const createAppointment = async ({
   });
 
   if (!doctor) {
-    const error = new Error("Doctor not found or inactive in this organization");
+    const error = new Error(
+      "Doctor not found or inactive in this organization",
+    );
     error.statusCode = 404;
     throw error;
   }
@@ -78,7 +80,7 @@ const createAppointment = async ({
 
     if (existingAppointment) {
       const error = new Error(
-        "Patient already has an appointment with this doctor on this date"
+        "Patient already has an appointment with this doctor on this date",
       );
       error.statusCode = 409;
       throw error;
@@ -363,8 +365,401 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
 
   return result;
 };
+const getPatientUpcomingAppointments = async ({
+  organizationId,
+  patientId,
+}) => {
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      organizationId,
+      patientId,
+      appointmentDate: {
+        gte: new Date(),
+      },
+      status: {
+        in: ["PENDING", "CONFIRMED"],
+      },
+    },
 
+    include: {
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          qualification: true,
+          consultationFeeMinor: true,
+        },
+      },
+
+      appointmentWindow: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+        },
+      },
+
+      payment: {
+        select: {
+          id: true,
+          method: true,
+          status: true,
+          amountMinor: true,
+          paidAt: true,
+        },
+      },
+    },
+
+    orderBy: [
+      {
+        appointmentDate: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+  });
+
+  return appointments;
+};
+const cancelAppointment = async ({ organizationId, appointmentId }) => {
+  // 1. Find appointment with tenant isolation
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      organizationId,
+    },
+    include: {
+      payment: true,
+    },
+  });
+
+  if (!appointment) {
+    const error = new Error("Appointment not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  // 2. Already cancelled
+  if (appointment.status === "CANCELLED") {
+    const error = new Error("Appointment is already cancelled");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 3. Completed appointments cannot be cancelled
+  if (appointment.status === "COMPLETED") {
+    const error = new Error("Completed appointment cannot be cancelled");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 4. No-show appointments cannot be cancelled
+  if (appointment.status === "NO_SHOW") {
+    const error = new Error("No-show appointment cannot be cancelled");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 5. Cancel appointment
+  const cancelledAppointment = await prisma.appointment.update({
+    where: {
+      id: appointment.id,
+    },
+    data: {
+      status: "CANCELLED",
+    },
+    include: {
+      payment: true,
+    },
+  });
+
+  return cancelledAppointment;
+};
+const getAppointmentById = async ({ organizationId, appointmentId }) => {
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      organizationId,
+    },
+
+    include: {
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          qualification: true,
+          registrationNumber: true,
+          consultationFeeMinor: true,
+          followUpPeriodDays: true,
+          status: true,
+        },
+      },
+
+      patient: {
+        select: {
+          id: true,
+          name: true,
+          dateOfBirth: true,
+          gender: true,
+
+          phones: {
+            select: {
+              phone: true,
+            },
+          },
+        },
+      },
+
+      appointmentWindow: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+          capacity: true,
+        },
+      },
+
+      payment: {
+        select: {
+          id: true,
+          amountMinor: true,
+          method: true,
+          status: true,
+          transactionId: true,
+          paidAt: true,
+        },
+      },
+
+      queue: {
+        select: {
+          id: true,
+          status: true,
+          checkedInAt: true,
+          calledAt: true,
+          completedAt: true,
+        },
+      },
+
+      consultation: {
+        select: {
+          id: true,
+          chiefComplaint: true,
+          diagnosis: true,
+          notes: true,
+          doctorRemarks: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      },
+    },
+  });
+
+  if (!appointment) {
+    const error = new Error("Appointment not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return appointment;
+};
+const getPatientAppointmentHistory = async ({ organizationId, patientId }) => {
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      organizationId,
+      patientId,
+      status: {
+        in: ["COMPLETED", "CANCELLED", "NO_SHOW"],
+      },
+    },
+
+    include: {
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          qualification: true,
+        },
+      },
+
+      appointmentWindow: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+        },
+      },
+
+      payment: {
+        select: {
+          id: true,
+          amountMinor: true,
+          method: true,
+          status: true,
+          paidAt: true,
+        },
+      },
+
+      queue: {
+        select: {
+          id: true,
+          status: true,
+          checkedInAt: true,
+          calledAt: true,
+          completedAt: true,
+        },
+      },
+
+      consultation: {
+        select: {
+          id: true,
+          chiefComplaint: true,
+          diagnosis: true,
+          notes: true,
+          doctorRemarks: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      },
+    },
+
+    orderBy: {
+      appointmentDate: "desc",
+    },
+  });
+
+  return appointments;
+};
+const getOrganizationAppointments = async ({
+  organizationId,
+  appointmentDate,
+  doctorId,
+  status,
+  patientId,
+}) => {
+  const requestedDate = new Date(appointmentDate);
+
+  if (Number.isNaN(requestedDate.getTime())) {
+    const error = new Error("Invalid appointment date");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  requestedDate.setUTCHours(0, 0, 0, 0);
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      organizationId,
+      appointmentDate: requestedDate,
+
+      ...(doctorId && {
+        doctorId,
+      }),
+
+      ...(patientId && {
+        patientId,
+      }),
+
+      ...(status && {
+        status,
+      }),
+    },
+
+    include: {
+      patient: {
+        select: {
+          id: true,
+          name: true,
+          dateOfBirth: true,
+          gender: true,
+
+          phones: {
+            select: {
+              phone: true,
+            },
+          },
+        },
+      },
+
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          qualification: true,
+          status: true,
+        },
+      },
+
+      appointmentWindow: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+          capacity: true,
+        },
+      },
+
+      payment: {
+        select: {
+          id: true,
+          amountMinor: true,
+          method: true,
+          status: true,
+          paidAt: true,
+        },
+      },
+
+      queue: {
+        select: {
+          id: true,
+          status: true,
+          checkedInAt: true,
+          calledAt: true,
+          completedAt: true,
+        },
+      },
+
+      consultation: {
+        select: {
+          id: true,
+          chiefComplaint: true,
+          diagnosis: true,
+          notes: true,
+          doctorRemarks: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      },
+    },
+
+    orderBy: [
+      {
+        doctorId: "asc",
+      },
+      {
+        tokenNumber: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+  });
+
+  return appointments;
+};
 module.exports = {
   createAppointment,
   confirmAppointment,
+  getPatientUpcomingAppointments,
+  cancelAppointment,
+  getAppointmentById,
+  getPatientAppointmentHistory,
+  getOrganizationAppointments,
 };

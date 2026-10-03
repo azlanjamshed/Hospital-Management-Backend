@@ -141,7 +141,380 @@ const confirmAppointment = async (req, res) => {
   }
 };
 
+const getPatientUpcomingAppointments = async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Only patients can access their own upcoming appointments
+    if (req.user.role !== "PATIENT") {
+      return res.status(403).json({
+        success: false,
+        message: "Only patients can access this resource",
+      });
+    }
+
+    const patient = await prisma.patient.findUnique({
+      where: {
+        userId: req.user.userId,
+      },
+    });
+
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient profile not found",
+      });
+    }
+
+    // Verify patient belongs to this organization
+    const patientOrganization = await prisma.patientOrganization.findUnique({
+      where: {
+        patientId_organizationId: {
+          patientId: patient.id,
+          organizationId,
+        },
+      },
+    });
+
+    if (!patientOrganization) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not belong to this organization",
+      });
+    }
+
+    const appointments =
+      await appointmentService.getPatientUpcomingAppointments({
+        organizationId,
+        patientId: patient.id,
+      });
+
+    return res.status(200).json({
+      success: true,
+      message: "Upcoming appointments fetched successfully",
+      data: appointments,
+    });
+  } catch (error) {
+    console.error("Get upcoming appointments error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch upcoming appointments",
+    });
+  }
+};
+const cancelAppointment = async (req, res) => {
+  try {
+    const { organizationId, appointmentId } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Patient can cancel only their own appointment
+    if (req.user.role === "PATIENT") {
+      const patient = await prisma.patient.findUnique({
+        where: {
+          userId: req.user.userId,
+        },
+      });
+
+      if (!patient) {
+        return res.status(404).json({
+          success: false,
+          message: "Patient profile not found",
+        });
+      }
+
+      const appointment = await prisma.appointment.findFirst({
+        where: {
+          id: appointmentId,
+          organizationId,
+          patientId: patient.id,
+        },
+      });
+
+      if (!appointment) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this appointment",
+        });
+      }
+    } else {
+      // Staff must belong to this organization
+      const membership = await prisma.organizationMember.findUnique({
+        where: {
+          userId_organizationId: {
+            userId: req.user.userId,
+            organizationId,
+          },
+        },
+      });
+
+      if (!membership || membership.status !== "ACTIVE") {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this organization",
+        });
+      }
+    }
+
+    const appointment = await appointmentService.cancelAppointment({
+      organizationId,
+      appointmentId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Appointment cancelled successfully",
+      data: appointment,
+    });
+  } catch (error) {
+    console.error("Cancel appointment error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to cancel appointment",
+    });
+  }
+};
+const getAppointmentById = async (req, res) => {
+  try {
+    const { organizationId, appointmentId } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Patient can access only their own appointment
+    if (req.user.role === "PATIENT") {
+      const patient = await prisma.patient.findUnique({
+        where: {
+          userId: req.user.userId,
+        },
+      });
+
+      if (!patient) {
+        return res.status(404).json({
+          success: false,
+          message: "Patient profile not found",
+        });
+      }
+
+      const appointment = await prisma.appointment.findFirst({
+        where: {
+          id: appointmentId,
+          organizationId,
+          patientId: patient.id,
+        },
+      });
+
+      if (!appointment) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this appointment",
+        });
+      }
+    } else {
+      // Staff must belong to this organization
+      const membership = await prisma.organizationMember.findUnique({
+        where: {
+          userId_organizationId: {
+            userId: req.user.userId,
+            organizationId,
+          },
+        },
+      });
+
+      if (!membership || membership.status !== "ACTIVE") {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this organization",
+        });
+      }
+    }
+
+    const appointment = await appointmentService.getAppointmentById({
+      organizationId,
+      appointmentId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Appointment fetched successfully",
+      data: appointment,
+    });
+  } catch (error) {
+    console.error("Get appointment error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to fetch appointment",
+    });
+  }
+};
+const getPatientAppointmentHistory = async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Only patients can access their own appointment history
+    if (req.user.role !== "PATIENT") {
+      return res.status(403).json({
+        success: false,
+        message: "Only patients can access this resource",
+      });
+    }
+
+    const patient = await prisma.patient.findUnique({
+      where: {
+        userId: req.user.userId,
+      },
+    });
+
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: "Patient profile not found",
+      });
+    }
+
+    // Verify patient belongs to this organization
+    const patientOrganization = await prisma.patientOrganization.findUnique({
+      where: {
+        patientId_organizationId: {
+          patientId: patient.id,
+          organizationId,
+        },
+      },
+    });
+
+    if (!patientOrganization) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not belong to this organization",
+      });
+    }
+
+    const appointments = await appointmentService.getPatientAppointmentHistory({
+      organizationId,
+      patientId: patient.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Appointment history fetched successfully",
+      data: appointments,
+    });
+  } catch (error) {
+    console.error("Get appointment history error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch appointment history",
+    });
+  }
+};
+const getOrganizationAppointments = async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    const { appointmentDate, doctorId, status, patientId } = req.query;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Patients cannot access organization-wide appointments
+    if (req.user.role === "PATIENT") {
+      return res.status(403).json({
+        success: false,
+        message: "Patients cannot access organization appointments",
+      });
+    }
+
+    // Verify active organization membership
+    const membership = await prisma.organizationMember.findUnique({
+      where: {
+        userId_organizationId: {
+          userId: req.user.userId,
+          organizationId,
+        },
+      },
+    });
+
+    if (!membership || membership.status !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this organization",
+      });
+    }
+
+    if (!appointmentDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment date is required",
+      });
+    }
+
+    const appointments = await appointmentService.getOrganizationAppointments({
+      organizationId,
+      appointmentDate,
+      doctorId,
+      status,
+      patientId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Organization appointments fetched successfully",
+      data: appointments,
+    });
+  } catch (error) {
+    console.error("Get organization appointments error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch organization appointments",
+    });
+  }
+};
 module.exports = {
   createAppointment,
   confirmAppointment,
+  getPatientUpcomingAppointments,
+  cancelAppointment,
+  getAppointmentById,
+  getPatientAppointmentHistory,
+  getOrganizationAppointments,
 };

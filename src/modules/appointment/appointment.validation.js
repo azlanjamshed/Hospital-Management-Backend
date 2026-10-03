@@ -14,6 +14,20 @@ const createAppointmentSchema = z.object({
   source: z.enum(["PATIENT_APP", "STAFF", "WHATSAPP"]).default("PATIENT_APP"),
 });
 
+const organizationAppointmentsQuerySchema = z.object({
+  appointmentDate: z.coerce.date({
+    error: "Valid appointment date is required",
+  }),
+
+  doctorId: z.string().uuid("Invalid doctor ID").optional(),
+
+  patientId: z.string().uuid("Invalid patient ID").optional(),
+
+  status: z
+    .enum(["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED", "NO_SHOW"])
+    .optional(),
+});
 module.exports = {
   createAppointmentSchema,
+  organizationAppointmentsQuerySchema,
 };

@@ -7,6 +7,8 @@ const {
   getAppointmentById,
   getPatientAppointmentHistory,
   getOrganizationAppointments,
+  markAppointmentNoShow,
+  getDoctorAppointments,
 } = require("./appointment.controller");
 const {
   createAppointmentSchema,
@@ -41,10 +43,20 @@ router.patch(
   authentication,
   cancelAppointment,
 );
+router.patch(
+  "/:organizationId/:appointmentId/no-show",
+  authentication,
+  markAppointmentNoShow,
+);
 router.get(
   "/:organizationId/history",
   authentication,
   getPatientAppointmentHistory,
+);
+router.get(
+  "/:organizationId/doctor/:doctorId",
+  authentication,
+  getDoctorAppointments,
 );
 router.get(
   "/:organizationId/:appointmentId",
@@ -54,7 +66,7 @@ router.get(
 router.get(
   "/:organizationId",
   authentication,
-  validate(organizationAppointmentsQuerySchema),
+  validate(organizationAppointmentsQuerySchema, "query"),
   getOrganizationAppointments,
 );
 

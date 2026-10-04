@@ -509,6 +509,139 @@ const getOrganizationAppointments = async (req, res) => {
     });
   }
 };
+const markAppointmentNoShow = async (req, res) => {
+  try {
+    const { organizationId, appointmentId } = req.params;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Patients cannot mark appointments as no-show
+    if (req.user.role === "PATIENT") {
+      return res.status(403).json({
+        success: false,
+        message: "Patients cannot mark appointments as no-show",
+      });
+    }
+
+    // Verify active organization membership
+    const membership = await prisma.organizationMember.findUnique({
+      where: {
+        userId_organizationId: {
+          userId: req.user.userId,
+          organizationId,
+        },
+      },
+    });
+
+    if (!membership || membership.status !== "ACTIVE") {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this organization",
+      });
+    }
+
+    // Only appropriate staff roles can mark no-show
+    const allowedRoles = ["ADMIN", "MANAGER", "RECEPTIONIST", "NURSE"];
+
+    if (!allowedRoles.includes(membership.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to mark appointments as no-show",
+      });
+    }
+
+    const appointment = await appointmentService.markAppointmentNoShow({
+      organizationId,
+      appointmentId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Appointment marked as no-show successfully",
+      data: appointment,
+    });
+  } catch (error) {
+    console.error("Mark appointment no-show error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to mark appointment as no-show",
+    });
+  }
+};
+const getDoctorAppointments = async (req, res) => {
+  try {
+    const { organizationId, doctorId } = req.params;
+    const { appointmentDate } = req.query;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // Only doctors can access this endpoint
+    if (req.user.role !== "DOCTOR") {
+      return res.status(403).json({
+        success: false,
+        message: "Only doctors can access this resource",
+      });
+    }
+
+    // Get the doctor linked to the logged-in user
+    const doctor = await prisma.doctor.findFirst({
+      where: {
+        id: doctorId,
+        userId: req.user.userId,
+        organizationId,
+        status: "ACTIVE",
+      },
+    });
+
+    if (!doctor) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have access to this doctor's appointments",
+      });
+    }
+
+    if (!appointmentDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Appointment date is required",
+      });
+    }
+
+    const appointments = await appointmentService.getDoctorAppointments({
+      organizationId,
+      doctorId,
+      appointmentDate,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Doctor appointments fetched successfully",
+      data: appointments,
+    });
+  } catch (error) {
+    console.error("Get doctor appointments error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch doctor appointments",
+    });
+  }
+};
 module.exports = {
   createAppointment,
   confirmAppointment,
@@ -517,4 +650,6 @@ module.exports = {
   getAppointmentById,
   getPatientAppointmentHistory,
   getOrganizationAppointments,
+  markAppointmentNoShow,
+  getDoctorAppointments,
 };

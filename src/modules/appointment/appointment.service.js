@@ -754,6 +754,171 @@ const getOrganizationAppointments = async ({
 
   return appointments;
 };
+const markAppointmentNoShow = async ({ organizationId, appointmentId }) => {
+  const appointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      organizationId,
+    },
+  });
+
+  if (!appointment) {
+    const error = new Error("Appointment not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (appointment.status === "NO_SHOW") {
+    const error = new Error("Appointment is already marked as no-show");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (appointment.status === "CANCELLED") {
+    const error = new Error(
+      "Cancelled appointment cannot be marked as no-show",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (appointment.status === "COMPLETED") {
+    const error = new Error(
+      "Completed appointment cannot be marked as no-show",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (appointment.status !== "CONFIRMED") {
+    const error = new Error(
+      "Only confirmed appointments can be marked as no-show",
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const updatedAppointment = await prisma.appointment.update({
+    where: {
+      id: appointment.id,
+    },
+    data: {
+      status: "NO_SHOW",
+    },
+  });
+
+  return updatedAppointment;
+};
+const getDoctorAppointments = async ({
+  organizationId,
+  doctorId,
+  appointmentDate,
+}) => {
+  const requestedDate = new Date(appointmentDate);
+
+  if (Number.isNaN(requestedDate.getTime())) {
+    const error = new Error("Invalid appointment date");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  requestedDate.setUTCHours(0, 0, 0, 0);
+
+  // Verify doctor belongs to this organization
+  const doctor = await prisma.doctor.findFirst({
+    where: {
+      id: doctorId,
+      organizationId,
+      status: "ACTIVE",
+    },
+  });
+
+  if (!doctor) {
+    const error = new Error(
+      "Doctor not found or inactive in this organization",
+    );
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      organizationId,
+      doctorId,
+      appointmentDate: requestedDate,
+    },
+
+    include: {
+      patient: {
+        select: {
+          id: true,
+          name: true,
+          dateOfBirth: true,
+          gender: true,
+
+          phones: {
+            select: {
+              phone: true,
+            },
+          },
+        },
+      },
+
+      payment: {
+        select: {
+          id: true,
+          amountMinor: true,
+          method: true,
+          status: true,
+          paidAt: true,
+        },
+      },
+
+      queue: {
+        select: {
+          id: true,
+          status: true,
+          checkedInAt: true,
+          calledAt: true,
+          completedAt: true,
+        },
+      },
+
+      consultation: {
+        select: {
+          id: true,
+          chiefComplaint: true,
+          diagnosis: true,
+          notes: true,
+          doctorRemarks: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      },
+
+      appointmentWindow: {
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+        },
+      },
+    },
+
+    orderBy: [
+      {
+        tokenNumber: "asc",
+      },
+      {
+        createdAt: "asc",
+      },
+    ],
+  });
+
+  return appointments;
+};
 module.exports = {
   createAppointment,
   confirmAppointment,
@@ -762,4 +927,6 @@ module.exports = {
   getAppointmentById,
   getPatientAppointmentHistory,
   getOrganizationAppointments,
+  markAppointmentNoShow,
+  getDoctorAppointments,
 };

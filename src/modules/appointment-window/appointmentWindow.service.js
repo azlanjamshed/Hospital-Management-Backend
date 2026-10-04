@@ -3,7 +3,7 @@ const prisma = require("../../config/prisma");
 const createOrUpdateAppointmentWindow = async (
   organizationId,
   doctorId,
-  data
+  data,
 ) => {
   const doctor = await prisma.doctor.findFirst({
     where: {
@@ -35,10 +35,21 @@ const createOrUpdateAppointmentWindow = async (
       },
     },
     update: {
-      startTime: data.startTime,
-      endTime: data.endTime,
-      capacity: data.capacity,
-      status: data.status,
+      ...(data.startTime !== undefined && {
+        startTime: data.startTime,
+      }),
+
+      ...(data.endTime !== undefined && {
+        endTime: data.endTime,
+      }),
+
+      ...(data.capacity !== undefined && {
+        capacity: data.capacity,
+      }),
+
+      ...(data.status !== undefined && {
+        status: data.status,
+      }),
     },
     create: {
       organizationId,
@@ -57,7 +68,7 @@ const createOrUpdateAppointmentWindow = async (
 const getDoctorAppointmentWindows = async (
   organizationId,
   doctorId,
-  query = {}
+  query = {},
 ) => {
   const doctor = await prisma.doctor.findFirst({
     where: {

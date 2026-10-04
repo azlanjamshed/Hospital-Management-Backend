@@ -1,4 +1,5 @@
 const patientService = require("./patient.service");
+const prisma = require("../../config/prisma");
 
 const createPatient = async (req, res) => {
   try {
@@ -123,11 +124,111 @@ const getPatientAppointments = async (req, res) => {
     });
   }
 };
+const getPatientMedicalHistory = async (req, res) => {
+  try {
+    const { organizationId, patientId } = req.params;
 
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    // PATIENT → can only view their own medical history
+    if (req.user.role === "PATIENT") {
+      const patient = await prisma.patient.findUnique({
+        where: {
+          userId: req.user.userId,
+        },
+      });
+
+      if (!patient) {
+        return res.status(404).json({
+          success: false,
+          message: "Patient profile not found",
+        });
+      }
+
+      if (patient.id !== patientId) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this patient's history",
+        });
+      }
+    }
+
+    // DOCTOR → must belong to this organization
+    else if (req.user.role === "DOCTOR") {
+      const doctor = await prisma.doctor.findFirst({
+        where: {
+          userId: req.user.userId,
+          organizationId,
+          status: "ACTIVE",
+        },
+      });
+
+      if (!doctor) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this organization",
+        });
+      }
+    }
+
+    // STAFF → must be active member of this organization
+    else {
+      const membership = await prisma.organizationMember.findUnique({
+        where: {
+          userId_organizationId: {
+            userId: req.user.userId,
+            organizationId,
+          },
+        },
+      });
+
+      if (!membership || membership.status !== "ACTIVE") {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have access to this organization",
+        });
+      }
+
+      // Receptionist should not access clinical medical history
+      if (!["ADMIN", "MANAGER", "NURSE"].includes(membership.role)) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have permission to view medical history",
+        });
+      }
+    }
+
+    const history = await patientService.getPatientMedicalHistory({
+      organizationId,
+      patientId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Patient medical history fetched successfully",
+      data: history,
+    });
+  } catch (error) {
+    console.error("Get patient medical history error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch patient medical history",
+    });
+  }
+};
 module.exports = {
   createPatient,
   searchPatients,
   linkPatientToOrganization,
   getPatientById,
   getPatientAppointments,
+  getPatientMedicalHistory,
 };

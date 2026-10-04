@@ -10,6 +10,7 @@ const {
   linkPatientToOrganization,
   getPatientById,
   getPatientAppointments,
+  getPatientMedicalHistory,
 } = require("./patient.controller");
 const {
   createPatientSchema,
@@ -50,8 +51,13 @@ router.get(
 router.get(
   "/:organizationId/patients/:patientId/appointments",
   authentication,
-  patientOrOrganizationRole("ADMIN", "MANAGER", "RECEPTIONIST", "NURSE"),
+  patientOrOrganizationRole("ADMIN", "RECEPTIONIST", "NURSE"),
 
   getPatientAppointments,
+);
+router.get(
+  "/:organizationId/patients/:patientId/medical-history",
+  authentication,
+  getPatientMedicalHistory,
 );
 module.exports = router;

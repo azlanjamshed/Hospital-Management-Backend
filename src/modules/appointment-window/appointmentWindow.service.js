@@ -91,13 +91,25 @@ const getDoctorAppointmentWindows = async (
   if (query.startDate) {
     const start = new Date(query.startDate);
     start.setUTCHours(0, 0, 0, 0);
-    where.date = { ...where.date, gte: start };
+
+    where.date = {
+      ...where.date,
+      gte: start,
+    };
   }
 
   if (query.endDate) {
     const end = new Date(query.endDate);
     end.setUTCHours(23, 59, 59, 999);
-    where.date = { ...where.date, lte: end };
+
+    where.date = {
+      ...where.date,
+      lte: end,
+    };
+  }
+
+  if (query.status) {
+    where.status = query.status;
   }
 
   return prisma.appointmentWindow.findMany({

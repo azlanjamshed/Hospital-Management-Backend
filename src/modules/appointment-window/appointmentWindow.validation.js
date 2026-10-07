@@ -9,11 +9,13 @@ const createAppointmentWindowSchema = z
     startTime: z
       .string()
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Start time must be in HH:mm format")
+      .nullable()
       .optional(),
 
     endTime: z
       .string()
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "End time must be in HH:mm format")
+      .nullable()
       .optional(),
 
     capacity: z.number().int().positive().optional(),

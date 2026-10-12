@@ -25,12 +25,17 @@ const createAppointment = async ({
       status: "ACTIVE",
     },
   });
-
   if (!doctor) {
     const error = new Error(
       "Doctor not found or inactive in this organization",
     );
     error.statusCode = 404;
+    throw error;
+  }
+
+  if (doctor.availabilityStatus !== "AVAILABLE") {
+    const error = new Error("Doctor is currently unavailable");
+    error.statusCode = 409;
     throw error;
   }
 
@@ -317,40 +322,162 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
     throw error;
   }
 
-  // Atomic confirmation and token assignment
   const result = await prisma.$transaction(async (tx) => {
-    // Re-verify status within transaction to guard against concurrent duplicate webhooks/calls
-    const currentAppointment = await tx.appointment.findFirst({
+    // 1. Get the appointment to identify its doctor and date.
+    const initialAppointment = await tx.appointment.findFirst({
       where: {
-        id: appointment.id,
+        id: appointmentId,
         organizationId,
       },
     });
+
+    if (!initialAppointment) {
+      const error = new Error("Appointment not found");
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const doctorId = initialAppointment.doctorId;
+    const appointmentDate = initialAppointment.appointmentDate;
+
+    // 2. Ensure the daily counter row exists.
+    // A new counter starts at zero, so the first assigned token is 1.
+    await tx.doctorDailyTokenCounter.upsert({
+      where: {
+        doctorId_date: {
+          doctorId,
+          date: appointmentDate,
+        },
+      },
+      update: {
+        lastToken: { increment: 0 },
+      },
+      create: {
+        organizationId,
+        doctorId,
+        date: appointmentDate,
+        lastToken: 0,
+      },
+    });
+
+    // 3. Lock the shared doctor/date counter until this transaction ends.
+    await tx.$queryRaw`
+      SELECT "doctorId"
+      FROM "DoctorDailyTokenCounter"
+      WHERE "doctorId" = ${doctorId}
+        AND "date" = ${appointmentDate}
+      FOR UPDATE
+    `;
+
+    // 4. Re-read after obtaining the lock.
+    // Another confirmation may have completed while we were waiting.
+    const currentAppointment = await tx.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        organizationId,
+      },
+    });
+
+    if (!currentAppointment) {
+      const error = new Error("Appointment not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
     if (currentAppointment.status === "CONFIRMED") {
       return currentAppointment;
     }
 
-    // Atomic increment using DoctorDailyTokenCounter
-    const tokenCounter = await tx.doctorDailyTokenCounter.upsert({
+    if (currentAppointment.status !== "PENDING") {
+      const error = new Error("Only pending appointments can be confirmed");
+      error.statusCode = 400;
+      throw error;
+    }
+
+    // 5. Recheck doctor availability.
+    const doctor = await tx.doctor.findFirst({
+      where: {
+        id: currentAppointment.doctorId,
+        organizationId,
+        status: "ACTIVE",
+        availabilityStatus: "AVAILABLE",
+      },
+    });
+
+    if (!doctor) {
+      const error = new Error("Doctor is currently unavailable");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // 6. Recheck the recurring schedule.
+    const requestedDate = new Date(currentAppointment.appointmentDate);
+    const weekday = requestedDate.getUTCDay();
+
+    const schedule = await tx.schedule.findFirst({
+      where: {
+        doctorId: currentAppointment.doctorId,
+        weekday,
+      },
+    });
+
+    if (!schedule) {
+      const error = new Error("Doctor has no schedule for this date");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // 7. Recheck the appointment window.
+    const appointmentWindow = await tx.appointmentWindow.findFirst({
+      where: {
+        organizationId,
+        doctorId: currentAppointment.doctorId,
+        date: currentAppointment.appointmentDate,
+      },
+    });
+
+    if (
+      appointmentWindow?.status === "CLOSED" ||
+      appointmentWindow?.status === "FULL"
+    ) {
+      const error = new Error("Appointment booking is closed for this date");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // 8. Recheck capacity while holding the shared lock.
+    if (appointmentWindow?.capacity != null) {
+      const confirmedCount = await tx.appointment.count({
+        where: {
+          organizationId,
+          doctorId: currentAppointment.doctorId,
+          appointmentDate: currentAppointment.appointmentDate,
+          status: "CONFIRMED",
+        },
+      });
+
+      if (confirmedCount >= appointmentWindow.capacity) {
+        const error = new Error("Appointment capacity is full for this date");
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
+    // 9. Increment the existing, locked counter atomically.
+    const tokenCounter = await tx.doctorDailyTokenCounter.update({
       where: {
         doctorId_date: {
           doctorId: currentAppointment.doctorId,
           date: currentAppointment.appointmentDate,
         },
       },
-      update: {
+      data: {
         lastToken: { increment: 1 },
-      },
-      create: {
-        organizationId,
-        doctorId: currentAppointment.doctorId,
-        date: currentAppointment.appointmentDate,
-        lastToken: 1,
       },
     });
 
-    const updatedAppointment = await tx.appointment.update({
+    // 10. Confirm the appointment and assign its token.
+    return tx.appointment.update({
       where: {
         id: currentAppointment.id,
       },
@@ -359,8 +486,6 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
         tokenNumber: tokenCounter.lastToken,
       },
     });
-
-    return updatedAppointment;
   });
 
   return result;
@@ -424,60 +549,78 @@ const getPatientUpcomingAppointments = async ({
 
   return appointments;
 };
+
 const cancelAppointment = async ({ organizationId, appointmentId }) => {
-  // 1. Find appointment with tenant isolation
-  const appointment = await prisma.appointment.findFirst({
-    where: {
-      id: appointmentId,
-      organizationId,
-    },
-    include: {
-      payment: true,
-    },
-  });
+  const cancelledAppointment = await prisma.$transaction(async (tx) => {
+    const appointment = await tx.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        organizationId,
+      },
+      include: {
+        payment: true,
+      },
+    });
 
-  if (!appointment) {
-    const error = new Error("Appointment not found");
-    error.statusCode = 404;
-    throw error;
-  }
+    if (!appointment) {
+      const error = new Error("Appointment not found");
+      error.statusCode = 404;
+      throw error;
+    }
 
-  // 2. Already cancelled
-  if (appointment.status === "CANCELLED") {
-    const error = new Error("Appointment is already cancelled");
-    error.statusCode = 400;
-    throw error;
-  }
+    if (appointment.status === "CANCELLED") {
+      const error = new Error("Appointment is already cancelled");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  // 3. Completed appointments cannot be cancelled
-  if (appointment.status === "COMPLETED") {
-    const error = new Error("Completed appointment cannot be cancelled");
-    error.statusCode = 400;
-    throw error;
-  }
+    if (appointment.status === "COMPLETED") {
+      const error = new Error("Completed appointment cannot be cancelled");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  // 4. No-show appointments cannot be cancelled
-  if (appointment.status === "NO_SHOW") {
-    const error = new Error("No-show appointment cannot be cancelled");
-    error.statusCode = 400;
-    throw error;
-  }
+    if (appointment.status === "NO_SHOW") {
+      const error = new Error("No-show appointment cannot be cancelled");
+      error.statusCode = 400;
+      throw error;
+    }
 
-  // 5. Cancel appointment
-  const cancelledAppointment = await prisma.appointment.update({
-    where: {
-      id: appointment.id,
-    },
-    data: {
-      status: "CANCELLED",
-    },
-    include: {
-      payment: true,
-    },
+    // Conditional update: only cancel if the status
+    // still matches the status we just read.
+    const result = await tx.appointment.updateMany({
+      where: {
+        id: appointment.id,
+        organizationId,
+        status: appointment.status,
+      },
+      data: {
+        status: "CANCELLED",
+      },
+    });
+
+    if (result.count !== 1) {
+      const error = new Error(
+        "Appointment status changed. Please refresh and try again.",
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+
+    return tx.appointment.findFirst({
+      where: {
+        id: appointment.id,
+        organizationId,
+      },
+      include: {
+        payment: true,
+      },
+    });
   });
 
   return cancelledAppointment;
 };
+
 const getAppointmentById = async ({ organizationId, appointmentId }) => {
   const appointment = await prisma.appointment.findFirst({
     where: {

@@ -1,4 +1,10 @@
+const crypto = require("crypto");
 const prisma = require("../../config/prisma");
+const createAppointmentError = (message, statusCode) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
 
 const createAppointment = async ({
   organizationId,
@@ -124,8 +130,16 @@ const createAppointment = async ({
       });
     }
 
-    // 4d. Find or create day-level AppointmentWindow
-    let appointmentWindow = await tx.appointmentWindow.findUnique({
+    // 4d. Find or create day-level AppointmentWindow atomically
+    const firstSchedule = schedules[0];
+    const windowId = crypto.randomUUID();
+    await tx.$executeRaw`
+      INSERT INTO "AppointmentWindow" ("id", "organizationId", "doctorId", "date", "startTime", "endTime", "status", "createdAt", "updatedAt")
+      VALUES (${windowId}, ${organizationId}, ${doctorId}, ${requestedDate}, ${firstSchedule.startTime}, ${firstSchedule.endTime}, ${"OPEN"}::"AppointmentWindowStatus", NOW(), NOW())
+      ON CONFLICT ("doctorId", "date") DO NOTHING
+    `;
+
+    const appointmentWindow = await tx.appointmentWindow.findUnique({
       where: {
         doctorId_date: {
           doctorId,
@@ -134,37 +148,38 @@ const createAppointment = async ({
       },
     });
 
-    if (!appointmentWindow) {
-      const firstSchedule = schedules[0];
-      appointmentWindow = await tx.appointmentWindow.create({
-        data: {
-          organizationId,
-          doctorId,
-          date: requestedDate,
-          startTime: firstSchedule.startTime,
-          endTime: firstSchedule.endTime,
-          status: "OPEN",
-        },
-      });
-    }
+    // Lock the appointment window row to serialize capacity checks across concurrent requests
+    await tx.$queryRaw`
+      SELECT "id"
+      FROM "AppointmentWindow"
+      WHERE "id" = ${appointmentWindow.id}
+      FOR UPDATE
+    `;
+
+    // Re-fetch window status after obtaining the lock to observe any state changes
+    const lockedWindow = await tx.appointmentWindow.findUnique({
+      where: { id: appointmentWindow.id },
+    });
 
     // 4e. Check window status
-    if (appointmentWindow.status === "CLOSED") {
+    if (lockedWindow.status === "CLOSED") {
       const error = new Error("Appointment booking is closed for this date");
       error.statusCode = 400;
       throw error;
     }
 
-    if (appointmentWindow.status === "FULL") {
+    if (lockedWindow.status === "FULL") {
       const error = new Error("Appointment window is full for this date");
       error.statusCode = 400;
       throw error;
     }
 
-    // 4f. Capacity check if configured
-    if (appointmentWindow.capacity) {
-      const activeCount = await tx.appointment.count({
+    // 4f. Capacity check if configured (serialized under row lock)
+    let activeCount = 0;
+    if (lockedWindow.capacity) {
+      activeCount = await tx.appointment.count({
         where: {
+          organizationId,
           doctorId,
           appointmentDate: requestedDate,
           status: {
@@ -173,9 +188,9 @@ const createAppointment = async ({
         },
       });
 
-      if (activeCount >= appointmentWindow.capacity) {
+      if (activeCount >= lockedWindow.capacity) {
         await tx.appointmentWindow.update({
-          where: { id: appointmentWindow.id },
+          where: { id: lockedWindow.id },
           data: { status: "FULL" },
         });
 
@@ -218,21 +233,35 @@ const createAppointment = async ({
     if (paymentMethod === "PAY_AT_HOSPITAL") {
       appointmentStatus = "CONFIRMED";
 
-      const tokenCounter = await tx.doctorDailyTokenCounter.upsert({
+      // Ensure the counter row exists atomically.
+      const counterId = crypto.randomUUID();
+      await tx.$executeRaw`
+        INSERT INTO "DoctorDailyTokenCounter" ("id", "organizationId", "doctorId", "date", "lastToken", "createdAt", "updatedAt")
+        VALUES (${counterId}, ${organizationId}, ${doctorId}, ${requestedDate}, 0, NOW(), NOW())
+        ON CONFLICT ("doctorId", "date") DO NOTHING
+      `;
+
+      // Lock the shared counter before assigning a token.
+      await tx.$queryRaw`
+        SELECT "doctorId"
+        FROM "DoctorDailyTokenCounter"
+        WHERE "doctorId" = ${doctorId}
+          AND "date" = ${requestedDate}
+        FOR UPDATE
+      `;
+
+      // Increment only after obtaining the lock.
+      const tokenCounter = await tx.doctorDailyTokenCounter.update({
         where: {
           doctorId_date: {
             doctorId,
             date: requestedDate,
           },
         },
-        update: {
-          lastToken: { increment: 1 },
-        },
-        create: {
-          organizationId,
-          doctorId,
-          date: requestedDate,
-          lastToken: 1,
+        data: {
+          lastToken: {
+            increment: 1,
+          },
         },
       });
 
@@ -257,6 +286,14 @@ const createAppointment = async ({
       },
     });
 
+    // If this booking reached the window's capacity, mark the window as FULL
+    if (lockedWindow.capacity && activeCount + 1 >= lockedWindow.capacity) {
+      await tx.appointmentWindow.update({
+        where: { id: lockedWindow.id },
+        data: { status: "FULL" },
+      });
+    }
+
     // 4j. Create Payment
     const payment = await tx.payment.create({
       data: {
@@ -272,6 +309,9 @@ const createAppointment = async ({
       payment,
       hospitalPatientNumber: patientOrganization.hospitalPatientNumber,
     };
+  }, {
+    maxWait: 10000,
+    timeout: 15000,
   });
 
   return result;
@@ -337,30 +377,128 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
       throw error;
     }
 
+    if (initialAppointment.status === "CONFIRMED") {
+      return initialAppointment;
+    }
+
+    if (initialAppointment.status !== "PENDING") {
+      const error = new Error("Only pending appointments can be confirmed");
+      error.statusCode = 400;
+      throw error;
+    }
+
     const doctorId = initialAppointment.doctorId;
     const appointmentDate = initialAppointment.appointmentDate;
 
-    // 2. Ensure the daily counter row exists.
-    // A new counter starts at zero, so the first assigned token is 1.
-    await tx.doctorDailyTokenCounter.upsert({
+    // 2. Recheck doctor availability.
+    const doctor = await tx.doctor.findFirst({
+      where: {
+        id: doctorId,
+        organizationId,
+        status: "ACTIVE",
+        availabilityStatus: "AVAILABLE",
+      },
+    });
+
+    if (!doctor) {
+      const error = new Error("Doctor is currently unavailable");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // 3. Recheck the recurring schedule.
+    const requestedDate = new Date(appointmentDate);
+    const weekday = requestedDate.getUTCDay();
+
+    const schedule = await tx.schedule.findFirst({
+      where: {
+        doctorId,
+        weekday,
+      },
+    });
+
+    if (!schedule) {
+      const error = new Error("Doctor has no schedule for this date");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // 4. Lock the appointment window FIRST to serialize capacity checks across concurrent bookings/confirmations
+    const windowId = crypto.randomUUID();
+    await tx.$executeRaw`
+      INSERT INTO "AppointmentWindow" ("id", "organizationId", "doctorId", "date", "startTime", "endTime", "status", "createdAt", "updatedAt")
+      VALUES (${windowId}, ${organizationId}, ${doctorId}, ${appointmentDate}, ${schedule.startTime}, ${schedule.endTime}, ${"OPEN"}::"AppointmentWindowStatus", NOW(), NOW())
+      ON CONFLICT ("doctorId", "date") DO NOTHING
+    `;
+
+    const appointmentWindow = await tx.appointmentWindow.findUnique({
       where: {
         doctorId_date: {
           doctorId,
           date: appointmentDate,
         },
       },
-      update: {
-        lastToken: { increment: 0 },
-      },
-      create: {
-        organizationId,
-        doctorId,
-        date: appointmentDate,
-        lastToken: 0,
-      },
     });
 
-    // 3. Lock the shared doctor/date counter until this transaction ends.
+    await tx.$queryRaw`
+      SELECT "id"
+      FROM "AppointmentWindow"
+      WHERE "id" = ${appointmentWindow.id}
+      FOR UPDATE
+    `;
+
+    const lockedWindow = await tx.appointmentWindow.findUnique({
+      where: { id: appointmentWindow.id },
+    });
+
+    if (
+      lockedWindow?.status === "CLOSED" ||
+      lockedWindow?.status === "FULL"
+    ) {
+      const error = new Error("Appointment booking is closed for this date");
+      error.statusCode = 409;
+      throw error;
+    }
+
+    // 5. Recheck capacity while holding the shared window lock.
+    let activeCount = 0;
+    if (lockedWindow?.capacity != null) {
+      activeCount = await tx.appointment.count({
+        where: {
+          organizationId,
+          doctorId,
+          appointmentDate,
+          id: {
+            not: initialAppointment.id,
+          },
+          status: {
+            notIn: ["CANCELLED", "NO_SHOW"],
+          },
+        },
+      });
+
+      if (activeCount >= lockedWindow.capacity) {
+        await tx.appointmentWindow.update({
+          where: { id: lockedWindow.id },
+          data: { status: "FULL" },
+        });
+
+        const error = new Error(
+          "Appointment capacity is full for this date",
+        );
+        error.statusCode = 409;
+        throw error;
+      }
+    }
+
+    // 6. Ensure and lock the daily counter row (after acquiring the window lock).
+    const counterId = crypto.randomUUID();
+    await tx.$executeRaw`
+      INSERT INTO "DoctorDailyTokenCounter" ("id", "organizationId", "doctorId", "date", "lastToken", "createdAt", "updatedAt")
+      VALUES (${counterId}, ${organizationId}, ${doctorId}, ${appointmentDate}, 0, NOW(), NOW())
+      ON CONFLICT ("doctorId", "date") DO NOTHING
+    `;
+
     await tx.$queryRaw`
       SELECT "doctorId"
       FROM "DoctorDailyTokenCounter"
@@ -369,8 +507,7 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
       FOR UPDATE
     `;
 
-    // 4. Re-read after obtaining the lock.
-    // Another confirmation may have completed while we were waiting.
+    // 7. Re-read appointment after acquiring locks.
     const currentAppointment = await tx.appointment.findFirst({
       where: {
         id: appointmentId,
@@ -384,6 +521,17 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
       throw error;
     }
 
+    if (
+      currentAppointment.appointmentDate.getTime() !==
+      appointmentDate.getTime()
+    ) {
+      const error = new Error(
+        "Appointment date changed concurrently. Please retry confirmation.",
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+
     if (currentAppointment.status === "CONFIRMED") {
       return currentAppointment;
     }
@@ -394,81 +542,12 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
       throw error;
     }
 
-    // 5. Recheck doctor availability.
-    const doctor = await tx.doctor.findFirst({
-      where: {
-        id: currentAppointment.doctorId,
-        organizationId,
-        status: "ACTIVE",
-        availabilityStatus: "AVAILABLE",
-      },
-    });
-
-    if (!doctor) {
-      const error = new Error("Doctor is currently unavailable");
-      error.statusCode = 409;
-      throw error;
-    }
-
-    // 6. Recheck the recurring schedule.
-    const requestedDate = new Date(currentAppointment.appointmentDate);
-    const weekday = requestedDate.getUTCDay();
-
-    const schedule = await tx.schedule.findFirst({
-      where: {
-        doctorId: currentAppointment.doctorId,
-        weekday,
-      },
-    });
-
-    if (!schedule) {
-      const error = new Error("Doctor has no schedule for this date");
-      error.statusCode = 409;
-      throw error;
-    }
-
-    // 7. Recheck the appointment window.
-    const appointmentWindow = await tx.appointmentWindow.findFirst({
-      where: {
-        organizationId,
-        doctorId: currentAppointment.doctorId,
-        date: currentAppointment.appointmentDate,
-      },
-    });
-
-    if (
-      appointmentWindow?.status === "CLOSED" ||
-      appointmentWindow?.status === "FULL"
-    ) {
-      const error = new Error("Appointment booking is closed for this date");
-      error.statusCode = 409;
-      throw error;
-    }
-
-    // 8. Recheck capacity while holding the shared lock.
-    if (appointmentWindow?.capacity != null) {
-      const confirmedCount = await tx.appointment.count({
-        where: {
-          organizationId,
-          doctorId: currentAppointment.doctorId,
-          appointmentDate: currentAppointment.appointmentDate,
-          status: "CONFIRMED",
-        },
-      });
-
-      if (confirmedCount >= appointmentWindow.capacity) {
-        const error = new Error("Appointment capacity is full for this date");
-        error.statusCode = 409;
-        throw error;
-      }
-    }
-
-    // 9. Increment the existing, locked counter atomically.
+    // 8. Increment the existing, locked counter atomically.
     const tokenCounter = await tx.doctorDailyTokenCounter.update({
       where: {
         doctorId_date: {
-          doctorId: currentAppointment.doctorId,
-          date: currentAppointment.appointmentDate,
+          doctorId,
+          date: appointmentDate,
         },
       },
       data: {
@@ -476,8 +555,8 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
       },
     });
 
-    // 10. Confirm the appointment and assign its token.
-    return tx.appointment.update({
+    // 9. Confirm the appointment and assign its token.
+    const confirmedAppointment = await tx.appointment.update({
       where: {
         id: currentAppointment.id,
       },
@@ -486,6 +565,19 @@ const confirmAppointment = async ({ organizationId, appointmentId }) => {
         tokenNumber: tokenCounter.lastToken,
       },
     });
+
+    // If confirming this appointment reached the window capacity, mark window FULL
+    if (lockedWindow?.capacity && activeCount + 1 >= lockedWindow.capacity) {
+      await tx.appointmentWindow.update({
+        where: { id: lockedWindow.id },
+        data: { status: "FULL" },
+      });
+    }
+
+    return confirmedAppointment;
+  }, {
+    maxWait: 10000,
+    timeout: 15000,
   });
 
   return result;
@@ -607,6 +699,40 @@ const cancelAppointment = async ({ organizationId, appointmentId }) => {
       throw error;
     }
 
+    // Reopen window if it was FULL and cancellation freed up capacity
+    const appointmentWindow = await tx.appointmentWindow.findUnique({
+      where: {
+        doctorId_date: {
+          doctorId: appointment.doctorId,
+          date: appointment.appointmentDate,
+        },
+      },
+    });
+
+    if (
+      appointmentWindow &&
+      appointmentWindow.status === "FULL" &&
+      appointmentWindow.capacity != null
+    ) {
+      const activeCount = await tx.appointment.count({
+        where: {
+          organizationId,
+          doctorId: appointment.doctorId,
+          appointmentDate: appointment.appointmentDate,
+          status: {
+            notIn: ["CANCELLED", "NO_SHOW"],
+          },
+        },
+      });
+
+      if (activeCount < appointmentWindow.capacity) {
+        await tx.appointmentWindow.update({
+          where: { id: appointmentWindow.id },
+          data: { status: "OPEN" },
+        });
+      }
+    }
+
     return tx.appointment.findFirst({
       where: {
         id: appointment.id,
@@ -616,6 +742,9 @@ const cancelAppointment = async ({ organizationId, appointmentId }) => {
         payment: true,
       },
     });
+  }, {
+    maxWait: 10000,
+    timeout: 15000,
   });
 
   return cancelledAppointment;
@@ -1062,6 +1191,425 @@ const getDoctorAppointments = async ({
 
   return appointments;
 };
+
+const rescheduleAppointment = async ({
+  organizationId,
+  appointmentId,
+  appointmentDate,
+  user,
+}) => {
+  if (!user || !user.userId) {
+    throw createAppointmentError("Authentication required", 401);
+  }
+
+  const newDate = new Date(appointmentDate);
+
+  if (Number.isNaN(newDate.getTime())) {
+    throw createAppointmentError("Invalid appointment date", 400);
+  }
+
+  // Keep the same date representation used by createAppointment.
+  newDate.setUTCHours(0, 0, 0, 0);
+
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  if (newDate <= today) {
+    throw createAppointmentError(
+      "Rescheduling date must be in the future",
+      400,
+    );
+  }
+
+  const initialAppointment = await prisma.appointment.findFirst({
+    where: {
+      id: appointmentId,
+      organizationId,
+    },
+    include: {
+      payment: true,
+      queue: true,
+    },
+  });
+
+  if (!initialAppointment) {
+    throw createAppointmentError("Appointment not found", 404);
+  }
+
+  if (initialAppointment.appointmentDate.getTime() === newDate.getTime()) {
+    throw createAppointmentError(
+      "New date must be different from the current appointment date",
+      400,
+    );
+  }
+
+  // Authorization:
+  // - Super Admin can manage appointments.
+  // - Patients can reschedule only their own appointments.
+  // - A doctor can reschedule appointments assigned to them.
+  // - Organization staff need an active membership with an allowed role.
+
+  if (user.role !== "SUPER_ADMIN") {
+    if (user.role === "PATIENT") {
+      const patient = await prisma.patient.findFirst({
+        where: {
+          userId: user.userId,
+          id: initialAppointment.patientId,
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!patient) {
+        throw createAppointmentError(
+          "You can only reschedule your own appointments",
+          403,
+        );
+      }
+    } else if (user.role === "DOCTOR") {
+      const doctor = await prisma.doctor.findFirst({
+        where: {
+          id: user.doctorId,
+          userId: user.userId,
+          organizationId,
+          status: "ACTIVE",
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!doctor || doctor.id !== initialAppointment.doctorId) {
+        throw createAppointmentError(
+          "You can only reschedule appointments assigned to you",
+          403,
+        );
+      }
+    } else {
+      const membership = await prisma.organizationMember.findFirst({
+        where: {
+          userId: user.userId,
+          organizationId,
+          status: "ACTIVE",
+          role: {
+            in: ["ADMIN", "MANAGER", "RECEPTIONIST", "NURSE"],
+          },
+        },
+        select: {
+          id: true,
+        },
+      });
+
+      if (!membership) {
+        throw createAppointmentError(
+          "You are not authorized to reschedule appointments in this organization",
+          403,
+        );
+      }
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const oldDate = initialAppointment.appointmentDate;
+    const doctorId = initialAppointment.doctorId;
+
+    // 1. The doctor must remain the same, active, and available.
+    const doctor = await tx.doctor.findFirst({
+      where: {
+        id: doctorId,
+        organizationId,
+        status: "ACTIVE",
+        availabilityStatus: "AVAILABLE",
+      },
+    });
+
+    if (!doctor) {
+      throw createAppointmentError("Doctor is currently unavailable", 409);
+    }
+
+    // 2. Validate the recurring schedule for the destination date.
+    const weekday = newDate.getUTCDay();
+
+    const schedule = await tx.schedule.findFirst({
+      where: {
+        doctorId,
+        weekday,
+      },
+    });
+
+    if (!schedule) {
+      throw createAppointmentError(
+        "Doctor has no schedule for the selected date",
+        409,
+      );
+    }
+
+    // 3. Find or create the destination appointment window atomically.
+    const destWindowId = crypto.randomUUID();
+    await tx.$executeRaw`
+      INSERT INTO "AppointmentWindow" ("id", "organizationId", "doctorId", "date", "startTime", "endTime", "status", "createdAt", "updatedAt")
+      VALUES (${destWindowId}, ${organizationId}, ${doctorId}, ${newDate}, ${schedule.startTime}, ${schedule.endTime}, ${"OPEN"}::"AppointmentWindowStatus", NOW(), NOW())
+      ON CONFLICT ("doctorId", "date") DO NOTHING
+    `;
+
+    const appointmentWindow = await tx.appointmentWindow.findUnique({
+      where: {
+        doctorId_date: {
+          doctorId,
+          date: newDate,
+        },
+      },
+    });
+
+    if (appointmentWindow.organizationId !== organizationId) {
+      throw createAppointmentError(
+        "Appointment window does not belong to this organization",
+        409,
+      );
+    }
+
+    // 4. Lock the destination appointment window FIRST to serialize capacity checks across concurrent bookings/reschedules
+    await tx.$queryRaw`
+      SELECT "id"
+      FROM "AppointmentWindow"
+      WHERE "id" = ${appointmentWindow.id}
+      FOR UPDATE
+    `;
+
+    const lockedDestWindow = await tx.appointmentWindow.findUnique({
+      where: { id: appointmentWindow.id },
+    });
+
+    if (
+      lockedDestWindow?.status === "CLOSED" ||
+      lockedDestWindow?.status === "FULL"
+    ) {
+      throw createAppointmentError(
+        "Appointment booking is closed for the selected date",
+        409,
+      );
+    }
+
+    // 5. Prevent duplicate active appointments for the same patient, doctor, and destination date.
+    const duplicateAppointment = await tx.appointment.findFirst({
+      where: {
+        organizationId,
+        patientId: initialAppointment.patientId,
+        doctorId,
+        appointmentDate: newDate,
+        id: {
+          not: initialAppointment.id,
+        },
+        status: {
+          notIn: ["CANCELLED", "NO_SHOW"],
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (duplicateAppointment) {
+      throw createAppointmentError(
+        "Patient already has an appointment with this doctor on the selected date",
+        409,
+      );
+    }
+
+    // 6. Capacity counts both PENDING and CONFIRMED bookings.
+    // CANCELLED and NO_SHOW appointments do not occupy capacity.
+    let activeCount = 0;
+    if (lockedDestWindow?.capacity != null) {
+      activeCount = await tx.appointment.count({
+        where: {
+          organizationId,
+          doctorId,
+          appointmentDate: newDate,
+          status: {
+            notIn: ["CANCELLED", "NO_SHOW"],
+          },
+        },
+      });
+
+      if (activeCount >= lockedDestWindow.capacity) {
+        await tx.appointmentWindow.update({
+          where: { id: lockedDestWindow.id },
+          data: { status: "FULL" },
+        });
+
+        throw createAppointmentError(
+          "Appointment capacity is full for the selected date",
+          409,
+        );
+      }
+    }
+
+    // 7. Lock the appointment row before modifying it.
+    await tx.$queryRaw`
+      SELECT "id"
+      FROM "Appointment"
+      WHERE "id" = ${appointmentId}
+        AND "organizationId" = ${organizationId}
+      FOR UPDATE
+    `;
+
+    // Re-read after acquiring locks to detect concurrent changes.
+    const appointment = await tx.appointment.findFirst({
+      where: {
+        id: appointmentId,
+        organizationId,
+      },
+      include: {
+        payment: true,
+        queue: true,
+      },
+    });
+
+    if (!appointment) {
+      throw createAppointmentError("Appointment not found", 404);
+    }
+
+    if (appointment.appointmentDate.getTime() !== oldDate.getTime()) {
+      throw createAppointmentError(
+        "Appointment date changed concurrently. Please refresh and try again",
+        409,
+      );
+    }
+
+    if (
+      appointment.status !== "PENDING" &&
+      appointment.status !== "CONFIRMED"
+    ) {
+      throw createAppointmentError(
+        "Only pending or confirmed appointments can be rescheduled",
+        400,
+      );
+    }
+
+    if (appointment.queue && appointment.queue.status !== "WAITING") {
+      throw createAppointmentError(
+        "Appointment cannot be rescheduled after queue processing has started",
+        409,
+      );
+    }
+
+    let tokenNumber = null;
+
+    // 8. If confirmed, lock the destination daily counter and assign a new token number.
+    if (appointment.status === "CONFIRMED") {
+      const counterId = crypto.randomUUID();
+      await tx.$executeRaw`
+        INSERT INTO "DoctorDailyTokenCounter" ("id", "organizationId", "doctorId", "date", "lastToken", "createdAt", "updatedAt")
+        VALUES (${counterId}, ${organizationId}, ${doctorId}, ${newDate}, 0, NOW(), NOW())
+        ON CONFLICT ("doctorId", "date") DO NOTHING
+      `;
+
+      await tx.$queryRaw`
+        SELECT "doctorId"
+        FROM "DoctorDailyTokenCounter"
+        WHERE "doctorId" = ${doctorId}
+          AND "date" = ${newDate}
+        FOR UPDATE
+      `;
+
+      const tokenCounter = await tx.doctorDailyTokenCounter.update({
+        where: {
+          doctorId_date: {
+            doctorId,
+            date: newDate,
+          },
+        },
+        data: {
+          lastToken: {
+            increment: 1,
+          },
+        },
+      });
+
+      tokenNumber = tokenCounter.lastToken;
+    }
+
+    // Update the appointment atomically.
+    // Payment and the existing WAITING queue entry are preserved.
+    const result = await tx.appointment.updateMany({
+      where: {
+        id: appointment.id,
+        organizationId,
+        status: appointment.status,
+        appointmentDate: oldDate,
+      },
+      data: {
+        appointmentDate: newDate,
+        startAt: newDate,
+        endAt: newDate,
+        appointmentWindowId: lockedDestWindow.id,
+        tokenNumber,
+      },
+    });
+
+    if (result.count !== 1) {
+      throw createAppointmentError(
+        "Appointment changed concurrently. Please refresh and try again",
+        409,
+      );
+    }
+
+    // If destination window reached capacity, mark FULL
+    if (lockedDestWindow?.capacity && activeCount + 1 >= lockedDestWindow.capacity) {
+      await tx.appointmentWindow.update({
+        where: { id: lockedDestWindow.id },
+        data: { status: "FULL" },
+      });
+    }
+
+    // Reopen old date's window if moving away freed up space
+    const oldWindow = await tx.appointmentWindow.findUnique({
+      where: {
+        doctorId_date: {
+          doctorId,
+          date: oldDate,
+        },
+      },
+    });
+
+    if (oldWindow && oldWindow.status === "FULL" && oldWindow.capacity != null) {
+      const oldActiveCount = await tx.appointment.count({
+        where: {
+          organizationId,
+          doctorId,
+          appointmentDate: oldDate,
+          status: {
+            notIn: ["CANCELLED", "NO_SHOW"],
+          },
+        },
+      });
+
+      if (oldActiveCount < oldWindow.capacity) {
+        await tx.appointmentWindow.update({
+          where: { id: oldWindow.id },
+          data: { status: "OPEN" },
+        });
+      }
+    }
+
+    return tx.appointment.findFirst({
+      where: {
+        id: appointment.id,
+        organizationId,
+      },
+      include: {
+        payment: true,
+        queue: true,
+        doctor: true,
+      },
+    });
+  }, {
+    maxWait: 10000,
+    timeout: 15000,
+  });
+};
+
 module.exports = {
   createAppointment,
   confirmAppointment,
@@ -1072,4 +1620,5 @@ module.exports = {
   getOrganizationAppointments,
   markAppointmentNoShow,
   getDoctorAppointments,
+  rescheduleAppointment,
 };

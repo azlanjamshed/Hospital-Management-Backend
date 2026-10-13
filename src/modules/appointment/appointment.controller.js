@@ -642,6 +642,43 @@ const getDoctorAppointments = async (req, res) => {
     });
   }
 };
+
+const rescheduleAppointment = async (req, res) => {
+  try {
+    const { organizationId, appointmentId } = req.params;
+    const { appointmentDate } = req.body;
+
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    const appointment = await appointmentService.rescheduleAppointment({
+      organizationId,
+      appointmentId,
+      appointmentDate,
+      user: req.user,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Appointment rescheduled successfully",
+      data: appointment,
+    });
+  } catch (error) {
+    console.error("Reschedule appointment error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to reschedule appointment",
+    });
+  }
+};
+
 module.exports = {
   createAppointment,
   confirmAppointment,
@@ -652,4 +689,5 @@ module.exports = {
   getOrganizationAppointments,
   markAppointmentNoShow,
   getDoctorAppointments,
+  rescheduleAppointment,
 };

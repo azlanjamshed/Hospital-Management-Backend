@@ -27,7 +27,13 @@ const organizationAppointmentsQuerySchema = z.object({
     .enum(["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED", "NO_SHOW"])
     .optional(),
 });
+const rescheduleAppointmentSchema = z.object({
+  appointmentDate: z.coerce.date({
+    error: "Valid appointment date is required",
+  }),
+});
 module.exports = {
   createAppointmentSchema,
   organizationAppointmentsQuerySchema,
+  rescheduleAppointmentSchema,
 };

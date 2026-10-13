@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 
-const requireOrganizationRole = (...allowedRoles) => {
+const requireOrganizationRole = (...roles) => {
+  const allowedRoles = roles.flat();
   return async (req, res, next) => {
     try {
       console.log("➡️ requireOrganization reached");

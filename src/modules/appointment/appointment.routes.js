@@ -9,10 +9,12 @@ const {
   getOrganizationAppointments,
   markAppointmentNoShow,
   getDoctorAppointments,
+  rescheduleAppointment,
 } = require("./appointment.controller");
 const {
   createAppointmentSchema,
   organizationAppointmentsQuerySchema,
+  rescheduleAppointmentSchema,
 } = require("./appointment.validation");
 
 const validate = require("../../middleware/validate");
@@ -41,6 +43,7 @@ router.patch(
 router.patch(
   "/:organizationId/:appointmentId/cancel",
   authentication,
+  requireOrganizationRole(["ADMIN", "RECEPTIONIST", "NURSE"]),
   cancelAppointment,
 );
 router.patch(
@@ -57,6 +60,12 @@ router.get(
   "/:organizationId/doctor/:doctorId",
   authentication,
   getDoctorAppointments,
+);
+router.patch(
+  "/:organizationId/:appointmentId/reschedule",
+  authentication,
+  validate(rescheduleAppointmentSchema),
+  rescheduleAppointment,
 );
 router.get(
   "/:organizationId/:appointmentId",

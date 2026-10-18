@@ -1,5 +1,40 @@
 const authService = require("./auth.service");
 
+/**
+ * Format patient details safely
+ */
+const formatPatient = (patient) => {
+  if (!patient) return null;
+  return {
+    id: patient.id,
+    name: patient.name,
+    dateOfBirth: patient.dateOfBirth,
+    gender: patient.gender,
+  };
+};
+
+/**
+ * Format memberships safely
+ */
+const formatMemberships = (memberships = []) => {
+  return memberships.map((membership) => ({
+    id: membership.id,
+    organizationId: membership.organizationId,
+    role: membership.role,
+    status: membership.status,
+    organization: membership.organization
+      ? {
+          id: membership.organization.id,
+          name: membership.organization.name,
+          type: membership.organization.type,
+        }
+      : null,
+  }));
+};
+
+/**
+ * POST /api/auth/register
+ */
 const register = async (req, res) => {
   try {
     const user = await authService.register(req.body);
@@ -13,13 +48,13 @@ const register = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        dateOfBirth: user.dateOfBirth,
-        gender: user.gender,
-        patientId: user.patient?.id,
+        dateOfBirth: user.patient?.dateOfBirth || null,
+        gender: user.patient?.gender || null,
+        patientId: user.patient?.id || null,
       },
     });
   } catch (error) {
-    console.error(error);
+    if (!error.statusCode) console.error("Register error:", error);
 
     res.status(error.statusCode || 500).json({
       success: false,
@@ -28,11 +63,12 @@ const register = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/auth/login
+ */
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
-
-    const result = await authService.login(email, password);
+    const result = await authService.login(req.body, req.body.password);
 
     res.status(200).json({
       success: true,
@@ -45,26 +81,16 @@ const login = async (req, res) => {
           email: result.user.email,
           phone: result.user.phone,
           role: result.user.role,
-          dateOfBirth: result.user.dateOfBirth,
-          patientId: result.user.patient?.id,
-          doctorId: result.user.doctor?.id,
-
-          memberships: result.user.memberships.map((membership) => ({
-            id: membership.id,
-            organizationId: membership.organizationId,
-            role: membership.role,
-            status: membership.status,
-            organization: {
-              id: membership.organization.id,
-              name: membership.organization.name,
-              type: membership.organization.type,
-            },
-          })),
+          dateOfBirth: result.user.patient?.dateOfBirth || null,
+          gender: result.user.patient?.gender || null,
+          patientId: result.user.patient?.id || null,
+          doctorId: result.user.doctor?.id || null,
+          memberships: formatMemberships(result.user.memberships),
         },
       },
     });
   } catch (error) {
-    console.error(error);
+    if (!error.statusCode) console.error("Login error:", error);
 
     res.status(error.statusCode || 500).json({
       success: false,
@@ -73,6 +99,9 @@ const login = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/auth/me
+ */
 const getMe = async (req, res) => {
   try {
     const user = await authService.getMe(req.user.userId);
@@ -92,18 +121,133 @@ const getMe = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
-        dateOfBirth: user.dateOfBirth,
-        patient: user.patient,
-        doctor: user.doctor,
-        memberships: user.memberships,
+        patient: formatPatient(user.patient),
+        doctor: user.doctor
+          ? {
+              id: user.doctor.id,
+              name: user.doctor.name,
+              status: user.doctor.status,
+              availabilityStatus: user.doctor.availabilityStatus,
+            }
+          : null,
+        memberships: formatMemberships(user.memberships),
       },
     });
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
+    console.error("getMe error:", error);
+    res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to fetch user",
+      message: error.statusCode ? error.message : "Failed to fetch user profile",
+    });
+  }
+};
+
+/**
+ * PATCH /api/auth/me
+ */
+const updateProfile = async (req, res) => {
+  try {
+    const user = await authService.updateProfile(req.user.userId, req.body);
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        patient: formatPatient(user.patient),
+        doctor: user.doctor
+          ? {
+              id: user.doctor.id,
+              name: user.doctor.name,
+              status: user.doctor.status,
+              availabilityStatus: user.doctor.availabilityStatus,
+            }
+          : null,
+        memberships: formatMemberships(user.memberships),
+      },
+    });
+  } catch (error) {
+    if (!error.statusCode) console.error("Update profile error:", error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to update profile",
+    });
+  }
+};
+
+/**
+ * POST /api/auth/change-password
+ */
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    await authService.changePassword(
+      req.user.userId,
+      currentPassword,
+      newPassword,
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Password changed successfully. Existing sessions have been revoked.",
+    });
+  } catch (error) {
+    if (!error.statusCode) console.error("Change password error:", error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to change password",
+    });
+  }
+};
+
+/**
+ * POST /api/auth/forgot-password
+ */
+const forgotPassword = async (req, res) => {
+  try {
+    const result = await authService.forgotPassword(req.body);
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    if (!error.statusCode) console.error("Forgot password error:", error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to process password reset request",
+    });
+  }
+};
+
+/**
+ * POST /api/auth/reset-password
+ */
+const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    await authService.resetPassword(token, newPassword);
+
+    res.status(200).json({
+      success: true,
+      message:
+        "Password has been reset successfully. Please log in with your new password.",
+    });
+  } catch (error) {
+    if (!error.statusCode) console.error("Reset password error:", error);
+
+    res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode ? error.message : "Failed to reset password",
     });
   }
 };
@@ -112,4 +256,8 @@ module.exports = {
   register,
   login,
   getMe,
+  updateProfile,
+  changePassword,
+  forgotPassword,
+  resetPassword,
 };

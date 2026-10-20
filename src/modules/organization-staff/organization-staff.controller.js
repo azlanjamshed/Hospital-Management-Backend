@@ -1,5 +1,8 @@
 const organizationStaffService = require("./organization-staff.service");
 
+/**
+ * POST /api/organization-staff/:organizationId/doctors
+ */
 const createDoctor = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -30,7 +33,7 @@ const createDoctor = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Create doctor error:", error);
+    if (!error.statusCode) console.error("Create doctor error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -39,26 +42,37 @@ const createDoctor = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/organization-staff/:organizationId/doctors
+ */
 const getDoctors = async (req, res) => {
   try {
     const organizationId = req.organization.id;
 
-    const doctors = await organizationStaffService.getDoctors(organizationId);
+    const result = await organizationStaffService.getDoctors(
+      organizationId,
+      req.query,
+    );
 
     return res.status(200).json({
       success: true,
       message: "Doctors fetched successfully",
-      data: doctors,
+      data: result.doctors,
+      pagination: result.pagination,
     });
   } catch (error) {
-    console.error("Get doctors error:", error);
+    if (!error.statusCode) console.error("Get doctors error:", error);
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to fetch doctors",
+      message: error.statusCode ? error.message : "Failed to fetch doctors",
     });
   }
 };
+
+/**
+ * GET /api/organization-staff/:organizationId/doctors/:doctorId
+ */
 const getDoctorById = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -75,7 +89,7 @@ const getDoctorById = async (req, res) => {
       data: doctor,
     });
   } catch (error) {
-    console.error("Get doctor error:", error);
+    if (!error.statusCode) console.error("Get doctor error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -84,6 +98,9 @@ const getDoctorById = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/organization-staff/:organizationId/doctors/:doctorId
+ */
 const updateDoctor = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -101,7 +118,7 @@ const updateDoctor = async (req, res) => {
       data: doctor,
     });
   } catch (error) {
-    console.error("Update doctor error:", error);
+    if (!error.statusCode) console.error("Update doctor error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -110,6 +127,9 @@ const updateDoctor = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/organization-staff/:organizationId/doctors/:doctorId/status
+ */
 const updateDoctorStatus = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -132,7 +152,7 @@ const updateDoctorStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Update doctor status error:", error);
+    if (!error.statusCode) console.error("Update doctor status error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -143,6 +163,9 @@ const updateDoctorStatus = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/organization-staff/:organizationId/doctors/:doctorId/departments
+ */
 const updateDoctorDepartments = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -161,7 +184,7 @@ const updateDoctorDepartments = async (req, res) => {
       data: {
         id: doctor.id,
         name: doctor.name,
-        departments: doctor.departments.map((item) => ({
+        departments: (doctor.departments || []).map((item) => ({
           id: item.department.id,
           name: item.department.name,
           status: item.department.status,
@@ -169,7 +192,7 @@ const updateDoctorDepartments = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Update doctor departments error:", error);
+    if (!error.statusCode) console.error("Update doctor departments error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -180,6 +203,9 @@ const updateDoctorDepartments = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/organization-staff/:organizationId/staff
+ */
 const createStaff = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -209,7 +235,7 @@ const createStaff = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Create staff error:", error);
+    if (!error.statusCode) console.error("Create staff error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -218,27 +244,37 @@ const createStaff = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/organization-staff/:organizationId/staff
+ */
 const getStaff = async (req, res) => {
   try {
     const organizationId = req.organization.id;
 
-    const staff = await organizationStaffService.getStaff(organizationId);
+    const result = await organizationStaffService.getStaff(
+      organizationId,
+      req.query,
+    );
 
     return res.status(200).json({
       success: true,
       message: "Staff fetched successfully",
-      data: staff,
+      data: result.staff,
+      pagination: result.pagination,
     });
   } catch (error) {
-    console.error("Get staff error:", error);
+    if (!error.statusCode) console.error("Get staff error:", error);
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to fetch staff",
+      message: error.statusCode ? error.message : "Failed to fetch staff",
     });
   }
 };
 
+/**
+ * GET /api/organization-staff/:organizationId/staff/:staffId
+ */
 const getStaffById = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -255,7 +291,7 @@ const getStaffById = async (req, res) => {
       data: staff,
     });
   } catch (error) {
-    console.error("Get staff by ID error:", error);
+    if (!error.statusCode) console.error("Get staff by ID error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -263,6 +299,10 @@ const getStaffById = async (req, res) => {
     });
   }
 };
+
+/**
+ * PATCH /api/organization-staff/:organizationId/staff/:staffId
+ */
 const updateStaff = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -294,7 +334,7 @@ const updateStaff = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Update staff error:", error);
+    if (!error.statusCode) console.error("Update staff error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -303,6 +343,9 @@ const updateStaff = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/organization-staff/:organizationId/staff/:staffId/status
+ */
 const updateStaffStatus = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -326,7 +369,7 @@ const updateStaffStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Update staff status error:", error);
+    if (!error.statusCode) console.error("Update staff status error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -336,6 +379,7 @@ const updateStaffStatus = async (req, res) => {
     });
   }
 };
+
 module.exports = {
   createDoctor,
   getDoctors,
@@ -343,7 +387,6 @@ module.exports = {
   updateDoctor,
   updateDoctorStatus,
   updateDoctorDepartments,
-
   createStaff,
   getStaff,
   getStaffById,

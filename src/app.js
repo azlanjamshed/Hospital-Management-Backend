@@ -20,7 +20,7 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
-app.use("/api/organization", organizationRoutes);
+app.use(["/api/organization", "/api/organizations"], organizationRoutes);
 app.use("/api/organization-staff", organizationStaffRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/patients", patientRoutes);

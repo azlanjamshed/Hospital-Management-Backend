@@ -27,7 +27,7 @@ app.use("/api/patients", patientRoutes);
 app.use(["/api/schedule", "/api/schedules"], scheduleRoutes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/appointments", appointmentRoutes);
-app.use("/api/appointment-windows", appointmentWindowRoutes);
+app.use(["/api/appointment-window", "/api/appointment-windows"], appointmentWindowRoutes);
 app.use("/api/queue", queueRoutes);
 app.use(["/api/consultation", "/api/consultations"], consultationRoutes);
 app.use("/api/prescriptions", prescriptionRoutes);

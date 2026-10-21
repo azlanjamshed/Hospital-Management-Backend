@@ -25,11 +25,11 @@ app.use(["/api/organization-staff", "/api/organization-staffs"], organizationSta
 app.use(["/api/department", "/api/departments"], departmentRoutes);
 app.use("/api/patients", patientRoutes);
 app.use(["/api/schedule", "/api/schedules"], scheduleRoutes);
-app.use("/api/availability", availabilityRoutes);
+app.use(["/api/availability", "/api/availabilities"], availabilityRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use(["/api/appointment-window", "/api/appointment-windows"], appointmentWindowRoutes);
 app.use("/api/queue", queueRoutes);
 app.use(["/api/consultation", "/api/consultations"], consultationRoutes);
 app.use("/api/prescriptions", prescriptionRoutes);
-app.use("/api/doctor-availability", doctorAvailabilityRoutes);
+app.use(["/api/doctor-availability", "/api/doctor-availabilities"], doctorAvailabilityRoutes);
 module.exports = app;

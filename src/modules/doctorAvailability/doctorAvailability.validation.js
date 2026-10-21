@@ -1,11 +1,13 @@
-const { z } = require("zod");
-
-const doctorAvailabilityQuerySchema = z.object({
-  date: z.coerce.date({
-    error: "Valid date is required",
-  }),
-});
+const {
+  availabilityParamsSchema,
+  getAvailabilityQuerySchema,
+  listAvailableDoctorsQuerySchema,
+} = require("../availability/availability.validation");
 
 module.exports = {
-  doctorAvailabilityQuerySchema,
+  availabilityParamsSchema,
+  doctorAvailabilityParamsSchema: availabilityParamsSchema,
+  doctorAvailabilityQuerySchema: getAvailabilityQuerySchema,
+  getAvailabilityQuerySchema,
+  listAvailableDoctorsQuerySchema,
 };

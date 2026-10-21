@@ -24,7 +24,7 @@ app.use(["/api/organization", "/api/organizations"], organizationRoutes);
 app.use(["/api/organization-staff", "/api/organization-staffs"], organizationStaffRoutes);
 app.use(["/api/department", "/api/departments"], departmentRoutes);
 app.use("/api/patients", patientRoutes);
-app.use("/api/schedules", scheduleRoutes);
+app.use(["/api/schedule", "/api/schedules"], scheduleRoutes);
 app.use("/api/availability", availabilityRoutes);
 app.use("/api/appointments", appointmentRoutes);
 app.use("/api/appointment-windows", appointmentWindowRoutes);

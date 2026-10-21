@@ -1,7 +1,10 @@
 const prisma = require("../../config/prisma");
 
+/**
+ * Creates a recurring doctor schedule.
+ */
 const createSchedule = async (organizationId, doctorId, data) => {
-  // Check doctor
+  // 1. Verify doctor exists in this organization
   const doctor = await prisma.doctor.findFirst({
     where: {
       id: doctorId,
@@ -15,14 +18,14 @@ const createSchedule = async (organizationId, doctorId, data) => {
     throw error;
   }
 
-  // Check time range
+  // 2. Validate time range
   if (data.startTime >= data.endTime) {
     const error = new Error("End time must be after start time");
     error.statusCode = 400;
     throw error;
   }
 
-  // Check overlapping schedule
+  // 3. Detect overlapping schedule for the same doctor and weekday
   const overlappingSchedule = await prisma.schedule.findFirst({
     where: {
       doctorId,
@@ -50,6 +53,7 @@ const createSchedule = async (organizationId, doctorId, data) => {
     throw error;
   }
 
+  // 4. Create schedule
   const schedule = await prisma.schedule.create({
     data: {
       doctorId,
@@ -62,7 +66,11 @@ const createSchedule = async (organizationId, doctorId, data) => {
   return schedule;
 };
 
-const getDoctorSchedules = async (organizationId, doctorId) => {
+/**
+ * Lists schedules for a doctor with optional weekday filtering and pagination.
+ */
+const getDoctorSchedules = async (organizationId, doctorId, query = {}) => {
+  // 1. Verify doctor exists in this organization
   const doctor = await prisma.doctor.findFirst({
     where: {
       id: doctorId,
@@ -76,22 +84,95 @@ const getDoctorSchedules = async (organizationId, doctorId) => {
     throw error;
   }
 
-  return prisma.schedule.findMany({
+  const where = {
+    doctorId,
+  };
+
+  if (query.weekday !== undefined && query.weekday !== null) {
+    where.weekday = parseInt(query.weekday, 10);
+  }
+
+  if (query.page || query.limit) {
+    const page = Math.max(1, parseInt(query.page || 1, 10));
+    const limit = Math.min(100, Math.max(1, parseInt(query.limit || 20, 10)));
+    const skip = (page - 1) * limit;
+
+    const [total, schedules] = await Promise.all([
+      prisma.schedule.count({ where }),
+      prisma.schedule.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
+      }),
+    ]);
+
+    return {
+      schedules,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
+  const schedules = await prisma.schedule.findMany({
+    where,
+    orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
+  });
+
+  return schedules;
+};
+
+/**
+ * Retrieves a single schedule by ID.
+ */
+const getScheduleById = async (organizationId, doctorId, scheduleId) => {
+  const doctor = await prisma.doctor.findFirst({
     where: {
+      id: doctorId,
+      organizationId,
+    },
+  });
+
+  if (!doctor) {
+    const error = new Error("Doctor not found in this organization");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const schedule = await prisma.schedule.findFirst({
+    where: {
+      id: scheduleId,
       doctorId,
     },
-    orderBy: [
-      {
-        weekday: "asc",
+    include: {
+      doctor: {
+        select: {
+          id: true,
+          name: true,
+          organizationId: true,
+        },
       },
-      {
-        startTime: "asc",
-      },
-    ],
+    },
   });
+
+  if (!schedule) {
+    const error = new Error("Schedule not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return schedule;
 };
+
+/**
+ * Updates an existing doctor schedule.
+ */
 const updateSchedule = async (organizationId, doctorId, scheduleId, data) => {
-  // Check doctor belongs to organization
+  // 1. Verify doctor belongs to organization
   const doctor = await prisma.doctor.findFirst({
     where: {
       id: doctorId,
@@ -105,7 +186,7 @@ const updateSchedule = async (organizationId, doctorId, scheduleId, data) => {
     throw error;
   }
 
-  // Check schedule belongs to this doctor
+  // 2. Check schedule belongs to this doctor
   const existingSchedule = await prisma.schedule.findFirst({
     where: {
       id: scheduleId,
@@ -119,19 +200,19 @@ const updateSchedule = async (organizationId, doctorId, scheduleId, data) => {
     throw error;
   }
 
-  // Calculate final values after update
-  const weekday = data.weekday ?? existingSchedule.weekday;
-  const startTime = data.startTime ?? existingSchedule.startTime;
-  const endTime = data.endTime ?? existingSchedule.endTime;
+  // 3. Calculate final values
+  const weekday = data.weekday !== undefined ? data.weekday : existingSchedule.weekday;
+  const startTime = data.startTime || existingSchedule.startTime;
+  const endTime = data.endTime || existingSchedule.endTime;
 
-  // Validate time range
+  // 4. Validate time range
   if (startTime >= endTime) {
     const error = new Error("End time must be after start time");
     error.statusCode = 400;
     throw error;
   }
 
-  // Check overlapping schedule
+  // 5. Check overlapping schedule excluding current schedule
   const overlappingSchedule = await prisma.schedule.findFirst({
     where: {
       doctorId,
@@ -176,8 +257,13 @@ const updateSchedule = async (organizationId, doctorId, scheduleId, data) => {
 
   return schedule;
 };
+
+/**
+ * Deletes a doctor schedule.
+ * Does not silently delete or cancel existing appointments or appointment windows.
+ */
 const deleteSchedule = async (organizationId, doctorId, scheduleId) => {
-  // Check doctor belongs to organization
+  // 1. Check doctor belongs to organization
   const doctor = await prisma.doctor.findFirst({
     where: {
       id: doctorId,
@@ -191,7 +277,7 @@ const deleteSchedule = async (organizationId, doctorId, scheduleId) => {
     throw error;
   }
 
-  // Check schedule belongs to this doctor
+  // 2. Check schedule belongs to this doctor
   const existingSchedule = await prisma.schedule.findFirst({
     where: {
       id: scheduleId,
@@ -215,9 +301,11 @@ const deleteSchedule = async (organizationId, doctorId, scheduleId) => {
     id: scheduleId,
   };
 };
+
 module.exports = {
   createSchedule,
   getDoctorSchedules,
+  getScheduleById,
   updateSchedule,
   deleteSchedule,
 };

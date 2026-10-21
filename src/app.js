@@ -22,7 +22,7 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use(["/api/organization", "/api/organizations"], organizationRoutes);
 app.use(["/api/organization-staff", "/api/organization-staffs"], organizationStaffRoutes);
-app.use("/api/departments", departmentRoutes);
+app.use(["/api/department", "/api/departments"], departmentRoutes);
 app.use("/api/patients", patientRoutes);
 app.use("/api/schedules", scheduleRoutes);
 app.use("/api/availability", availabilityRoutes);

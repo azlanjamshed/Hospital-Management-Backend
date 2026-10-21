@@ -1,5 +1,8 @@
 const departmentService = require("./department.service");
 
+/**
+ * POST /api/departments/:organizationId
+ */
 const createDepartment = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -15,7 +18,7 @@ const createDepartment = async (req, res) => {
       data: department,
     });
   } catch (error) {
-    console.error("Create department error:", error);
+    if (!error.statusCode) console.error("Create department error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -24,27 +27,37 @@ const createDepartment = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/departments/:organizationId
+ */
 const getDepartments = async (req, res) => {
   try {
     const organizationId = req.organization.id;
 
-    const departments = await departmentService.getDepartments(organizationId);
+    const result = await departmentService.getDepartments(
+      organizationId,
+      req.query,
+    );
 
     return res.status(200).json({
       success: true,
       message: "Departments fetched successfully",
-      data: departments,
+      data: result.departments,
+      pagination: result.pagination,
     });
   } catch (error) {
-    console.error("Get departments error:", error);
+    if (!error.statusCode) console.error("Get departments error:", error);
 
-    return res.status(500).json({
+    return res.status(error.statusCode || 500).json({
       success: false,
-      message: "Failed to fetch departments",
+      message: error.statusCode ? error.message : "Failed to fetch departments",
     });
   }
 };
 
+/**
+ * GET /api/departments/:organizationId/:departmentId
+ */
 const getDepartmentById = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -61,7 +74,7 @@ const getDepartmentById = async (req, res) => {
       data: department,
     });
   } catch (error) {
-    console.error("Get department error:", error);
+    if (!error.statusCode) console.error("Get department error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -70,6 +83,42 @@ const getDepartmentById = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/departments/:organizationId/:departmentId/doctors
+ */
+const getDepartmentDoctors = async (req, res) => {
+  try {
+    const organizationId = req.organization.id;
+    const { departmentId } = req.params;
+
+    const result = await departmentService.getDepartmentDoctors(
+      organizationId,
+      departmentId,
+      req.query,
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Department doctors fetched successfully",
+      department: result.department,
+      data: result.doctors,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    if (!error.statusCode) console.error("Get department doctors error:", error);
+
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode
+        ? error.message
+        : "Failed to fetch department doctors",
+    });
+  }
+};
+
+/**
+ * PATCH /api/departments/:organizationId/:departmentId
+ */
 const updateDepartment = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -87,7 +136,7 @@ const updateDepartment = async (req, res) => {
       data: department,
     });
   } catch (error) {
-    console.error("Update department error:", error);
+    if (!error.statusCode) console.error("Update department error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -96,6 +145,9 @@ const updateDepartment = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/departments/:organizationId/:departmentId/status
+ */
 const updateDepartmentStatus = async (req, res) => {
   try {
     const organizationId = req.organization.id;
@@ -119,7 +171,8 @@ const updateDepartmentStatus = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Update department status error:", error);
+    if (!error.statusCode)
+      console.error("Update department status error:", error);
 
     return res.status(error.statusCode || 500).json({
       success: false,
@@ -134,6 +187,7 @@ module.exports = {
   createDepartment,
   getDepartments,
   getDepartmentById,
+  getDepartmentDoctors,
   updateDepartment,
   updateDepartmentStatus,
 };
